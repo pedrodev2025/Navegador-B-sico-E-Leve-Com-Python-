@@ -6,7 +6,8 @@ sudo apt install python3
 sudo apt install python3-pip
 sudo pip install PyQt5.QtCore
 sudo pip install PyQt5.QtWidgets
-sudo pip install PyQt5.QtWebEngineWidgets```
+sudo pip install PyQt5.QtWebEngineWidgets
+```
 depois baixe o navegador
 ```bash
 sudo apt install git
