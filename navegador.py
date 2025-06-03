@@ -31,32 +31,32 @@ class MiniNavegador(QMainWindow):
         # Botões da barra de navegação
         back_btn = QAction("⬅️ Voltar", self)
         back_btn.setStatusTip("Voltar para a página anterior")
-        back_btn.triggered.connect(lambda: self.current_browser().back()) # Conecta a uma lambda para chamar no clique
+        back_btn.triggered.connect(lambda: self.current_browser().back())
         self.toolbar.addAction(back_btn)
 
         forward_btn = QAction("➡️ Avançar", self)
         forward_btn.setStatusTip("Avançar para a próxima página")
-        forward_btn.triggered.connect(lambda: self.current_browser().forward()) # Conecta a uma lambda
+        forward_btn.triggered.connect(lambda: self.current_browser().forward())
         self.toolbar.addAction(forward_btn)
 
         reload_btn = QAction("🔄 Recarregar", self)
         reload_btn.setStatusTip("Recarregar a página atual")
-        reload_btn.triggered.connect(lambda: self.current_browser().reload()) # Conecta a uma lambda
+        reload_btn.triggered.connect(lambda: self.current_browser().reload())
         self.toolbar.addAction(reload_btn)
 
         home_btn = QAction("🏠 Início", self)
         home_btn.setStatusTip("Ir para a página inicial")
-        home_btn.triggered.connect(self.navigate_home) # Essa já estava OK
+        home_btn.triggered.connect(self.navigate_home)
         self.toolbar.addAction(home_btn)
 
         self.url_bar = QLineEdit()
         self.url_bar.returnPressed.connect(self.navigate_to_url)
         self.toolbar.addWidget(self.url_bar)
 
-        # Botão para adicionar nova guia
+        # Botão para adicionar nova guia - AGORA USANDO LAMBDA PARA GARANTIR NENHUM ARGUMENTO
         new_tab_btn = QAction("➕ Nova Guia", self)
         new_tab_btn.setStatusTip("Abrir uma nova guia")
-        new_tab_btn.triggered.connect(self.add_new_tab)
+        new_tab_btn.triggered.connect(lambda: self.add_new_tab()) # <--- AQUI ESTÁ A MUDANÇA PRINCIPAL
         self.toolbar.addAction(new_tab_btn)
 
 
@@ -70,18 +70,19 @@ class MiniNavegador(QMainWindow):
 
     def current_browser(self):
         """Retorna a instância do navegador da guia atual."""
-        # Garante que sempre haja um widget antes de tentar acessá-lo
         if self.tabs.count() > 0:
             return self.tabs.currentWidget()
-        return None # Retorna None se não houver abas (embora sempre teremos uma)
+        return None
 
     def add_new_tab(self, qurl=None, label="Nova Guia"):
         """Adiciona uma nova guia ao navegador."""
-        if qurl is None:
+        # Se qurl é None, ele significa que a chamada veio sem argumento (e deve usar o padrão)
+        # Se vier um bool (True/False), isso é um sinal indesejado, então redefinimos para o padrão
+        if qurl is None or isinstance(qurl, bool):
             qurl = QUrl("https://www.google.com") # Padrão para nova aba
 
         browser = BrowserTab()
-        browser.setUrl(qurl)
+        browser.setUrl(qurl) # Agora qurl será sempre um QUrl
 
         i = self.tabs.addTab(browser, label)
         self.tabs.setCurrentIndex(i)
@@ -98,7 +99,7 @@ class MiniNavegador(QMainWindow):
     def tab_open_doubleclick(self, index):
         """Abre uma nova guia ao dar clique duplo na barra de abas."""
         if index == -1: # Clicou em uma área vazia
-            self.add_new_tab()
+            self.add_new_tab() # Chama sem argumentos explícitos
 
     def current_tab_changed(self, index):
         """Atualiza a barra de URL quando a guia ativa muda."""
@@ -106,7 +107,7 @@ class MiniNavegador(QMainWindow):
         if browser:
             qurl = browser.url()
             self.update_urlbar(qurl, browser)
-            self.update_buttons_state() # Garante que os botões refletem a guia atual
+            self.update_buttons_state()
 
     def navigate_home(self):
         """Volta para a página inicial."""
@@ -121,60 +122,52 @@ class MiniNavegador(QMainWindow):
         """
         url = self.url_bar.text()
         browser = self.current_browser()
-        if not browser: # Se não houver navegador ativo, não faz nada
+        if not browser:
             return
 
-        # 1. Adiciona https:// se não houver protocolo
         if not url.startswith("http://") and not url.startswith("https://"):
-            # Verifica se parece um domínio (contém pelo menos um ponto)
-            if "." in url and not " " in url: # Garante que não é uma frase com espaços
-                url = "https://" + url # Tenta HTTPS por padrão
+            if "." in url and not " " in url:
+                url = "https://" + url
             else:
-                # 2. Se não parecer uma URL, faz uma pesquisa no Google
                 search_query = QUrl.toPercentEncoding(url)
                 url = f"https://www.google.com/search?q={search_query}"
 
         browser.setUrl(QUrl(url))
-        self.update_buttons_state() # Atualiza o estado dos botões após a navegação
+        self.update_buttons_state()
 
     def update_urlbar(self, q, browser=None):
         """Atualiza a barra de URL com a URL da guia atual."""
-        # Apenas atualiza se o navegador passado for o navegador atual ou se não houver um navegador específico
         if browser is None or browser == self.current_browser():
             self.url_bar.setText(q.toString())
-            self.url_bar.setCursorPosition(0) # Volta o cursor para o início
+            self.url_bar.setCursorPosition(0)
 
     def update_buttons_state(self):
         """Atualiza o estado (habilitado/desabilitado) dos botões de navegação."""
         browser = self.current_browser()
         if browser:
-            # Acessa o histórico para verificar se pode voltar/avançar
             history = browser.history()
             can_go_back = history.canGoBack()
             can_go_forward = history.canGoForward()
         else:
-            # Se não houver navegador, desabilita tudo
             can_go_back = False
             can_go_forward = False
 
         for action in self.toolbar.actions():
             if action.text() == "⬅️ Voltar":
-                # Habilita "Voltar" se houver um navegador, puder voltar e não estiver na página inicial
                 action.setEnabled(browser is not None and can_go_back and browser.url() != QUrl("https://www.google.com"))
             elif action.text() == "➡️ Avançar":
                 action.setEnabled(browser is not None and can_go_forward)
             elif action.text() == "🔄 Recarregar":
-                action.setEnabled(browser is not None) # Recarregar sempre que houver um navegador
+                action.setEnabled(browser is not None)
             elif action.text() == "🏠 Início":
-                action.setEnabled(browser is not None) # Home sempre que houver um navegador
+                action.setEnabled(browser is not None)
             elif action.text() == "➕ Nova Guia":
-                action.setEnabled(True) # Nova guia sempre habilitada
+                action.setEnabled(True)
 
 
-# Função principal para rodar o aplicativo
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    QApplication.setApplicationName("Navegador Py-Tech") # Define o nome da aplicação para o sistema
+    QApplication.setApplicationName("Navegador Py-Tech")
     navegador = MiniNavegador()
     navegador.show()
     sys.exit(app.exec_())
