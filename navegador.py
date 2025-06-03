@@ -53,19 +53,17 @@ class MiniNavegador(QMainWindow):
         self.url_bar.returnPressed.connect(self.navigate_to_url)
         self.toolbar.addWidget(self.url_bar)
 
-        # Botão para adicionar nova guia - AGORA USANDO LAMBDA PARA GARANTIR NENHUM ARGUMENTO
+        # Botão para adicionar nova guia
         new_tab_btn = QAction("➕ Nova Guia", self)
         new_tab_btn.setStatusTip("Abrir uma nova guia")
-        new_tab_btn.triggered.connect(lambda: self.add_new_tab()) # <--- AQUI ESTÁ A MUDANÇA PRINCIPAL
+        new_tab_btn.triggered.connect(lambda: self.add_new_tab())
         self.toolbar.addAction(new_tab_btn)
 
 
-        self.add_new_tab(QUrl("https://www.google.com"), "Página Inicial") # Adiciona a primeira guia
-        # Após adicionar a primeira aba, garantimos que os botões sejam atualizados
+        self.add_new_tab(QUrl("https://www.google.com"), "Página Inicial")
         self.update_buttons_state()
 
 
-        # Ocultar a barra de status por enquanto (pode ser adicionada depois se necessário)
         self.statusBar().hide()
 
     def current_browser(self):
@@ -76,30 +74,26 @@ class MiniNavegador(QMainWindow):
 
     def add_new_tab(self, qurl=None, label="Nova Guia"):
         """Adiciona uma nova guia ao navegador."""
-        # Se qurl é None, ele significa que a chamada veio sem argumento (e deve usar o padrão)
-        # Se vier um bool (True/False), isso é um sinal indesejado, então redefinimos para o padrão
         if qurl is None or isinstance(qurl, bool):
-            qurl = QUrl("https://www.google.com") # Padrão para nova aba
+            qurl = QUrl("https://www.google.com")
 
         browser = BrowserTab()
-        browser.setUrl(qurl) # Agora qurl será sempre um QUrl
+        browser.setUrl(qurl)
 
         i = self.tabs.addTab(browser, label)
         self.tabs.setCurrentIndex(i)
 
-        # Atualiza a URL na barra quando a página muda
         browser.urlChanged.connect(lambda qurl_obj, browser=browser: self.update_urlbar(qurl_obj, browser))
-        browser.loadStarted.connect(lambda: self.update_buttons_state()) # Atualiza estado dos botões
-        browser.loadFinished.connect(lambda success: self.update_buttons_state()) # Atualiza estado dos botões
+        browser.loadStarted.connect(lambda: self.update_buttons_state())
+        browser.loadFinished.connect(lambda success: self.update_buttons_state())
 
-        # Conectar o título da guia para ser o título da página
         browser.titleChanged.connect(lambda title, browser=browser: self.tabs.setTabText(self.tabs.indexOf(browser), title))
 
 
     def tab_open_doubleclick(self, index):
         """Abre uma nova guia ao dar clique duplo na barra de abas."""
-        if index == -1: # Clicou em uma área vazia
-            self.add_new_tab() # Chama sem argumentos explícitos
+        if index == -1:
+            self.add_new_tab()
 
     def current_tab_changed(self, index):
         """Atualiza a barra de URL quando a guia ativa muda."""
@@ -129,8 +123,12 @@ class MiniNavegador(QMainWindow):
             if "." in url and not " " in url:
                 url = "https://" + url
             else:
-                search_query = QUrl.toPercentEncoding(url)
-                url = f"https://www.google.com/search?q={search_query}"
+                # --- AQUI ESTÁ A CORREÇÃO ---
+                # Codifica o termo de busca para bytes e depois o decodifica para string normal antes de usar
+                search_query_bytes = QUrl.toPercentEncoding(url)
+                search_query_str = search_query_bytes.data().decode('utf-8') # Converte QByteArray para string UTF-8
+                url = f"https://www.google.com/search?q={search_query_str}"
+                # ----------------------------
 
         browser.setUrl(QUrl(url))
         self.update_buttons_state()
