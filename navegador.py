@@ -61,6 +61,9 @@ class MiniNavegador(QMainWindow):
 
 
         self.add_new_tab(QUrl("https://www.google.com"), "Página Inicial") # Adiciona a primeira guia
+        # Após adicionar a primeira aba, garantimos que os botões sejam atualizados
+        self.update_buttons_state()
+
 
         # Ocultar a barra de status por enquanto (pode ser adicionada depois se necessário)
         self.statusBar().hide()
@@ -144,13 +147,22 @@ class MiniNavegador(QMainWindow):
     def update_buttons_state(self):
         """Atualiza o estado (habilitado/desabilitado) dos botões de navegação."""
         browser = self.current_browser()
-        # Itera sobre as ações da toolbar para encontrar os botões e atualizar seus estados
+        if browser:
+            # Acessa o histórico para verificar se pode voltar/avançar
+            history = browser.history()
+            can_go_back = history.canGoBack()
+            can_go_forward = history.canGoForward()
+        else:
+            # Se não houver navegador, desabilita tudo
+            can_go_back = False
+            can_go_forward = False
+
         for action in self.toolbar.actions():
             if action.text() == "⬅️ Voltar":
-                # Habilita "Voltar" se houver um navegador e puder voltar, e não estiver na página inicial
-                action.setEnabled(browser is not None and browser.canGoBack() and browser.url() != QUrl("https://www.google.com"))
+                # Habilita "Voltar" se houver um navegador, puder voltar e não estiver na página inicial
+                action.setEnabled(browser is not None and can_go_back and browser.url() != QUrl("https://www.google.com"))
             elif action.text() == "➡️ Avançar":
-                action.setEnabled(browser is not None and browser.canGoForward())
+                action.setEnabled(browser is not None and can_go_forward)
             elif action.text() == "🔄 Recarregar":
                 action.setEnabled(browser is not None) # Recarregar sempre que houver um navegador
             elif action.text() == "🏠 Início":
