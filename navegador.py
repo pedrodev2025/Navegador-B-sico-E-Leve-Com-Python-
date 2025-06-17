@@ -27,7 +27,6 @@ class MiniNavegador(QMainWindow):
 
         self.setCentralWidget(self.tabs)
 
-        # Agora que self.tabs existe e tem uma guia, podemos conectar os botões
         # Botões da barra de navegação
         back_btn = QAction("⬅️ Voltar", self)
         back_btn.setStatusTip("Voltar para a página anterior")
@@ -53,16 +52,20 @@ class MiniNavegador(QMainWindow):
         self.url_bar.returnPressed.connect(self.navigate_to_url)
         self.toolbar.addWidget(self.url_bar)
 
+        # Adiciona a barra de progresso aqui
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximumWidth(150) # Opcional: Define uma largura máxima
+        self.progress_bar.setVisible(False) # Começa invisível
+        self.toolbar.addWidget(self.progress_bar)
+
         # Botão para adicionar nova guia
         new_tab_btn = QAction("➕ Nova Guia", self)
         new_tab_btn.setStatusTip("Abrir uma nova guia")
         new_tab_btn.triggered.connect(lambda: self.add_new_tab())
         self.toolbar.addAction(new_tab_btn)
 
-
         self.add_new_tab(QUrl("https://www.google.com"), "Página Inicial")
         self.update_buttons_state()
-
 
         self.statusBar().hide()
 
@@ -83,12 +86,14 @@ class MiniNavegador(QMainWindow):
         i = self.tabs.addTab(browser, label)
         self.tabs.setCurrentIndex(i)
 
+        # Conecta o sinal loadProgress DO OBJETO browser criado AGORA
+        browser.loadProgress.connect(self.update_progress_bar)
+
         browser.urlChanged.connect(lambda qurl_obj, browser=browser: self.update_urlbar(qurl_obj, browser))
         browser.loadStarted.connect(lambda: self.update_buttons_state())
         browser.loadFinished.connect(lambda success: self.update_buttons_state())
 
         browser.titleChanged.connect(lambda title, browser=browser: self.tabs.setTabText(self.tabs.indexOf(browser), title))
-
 
     def tab_open_doubleclick(self, index):
         """Abre uma nova guia ao dar clique duplo na barra de abas."""
@@ -152,7 +157,8 @@ class MiniNavegador(QMainWindow):
 
         for action in self.toolbar.actions():
             if action.text() == "⬅️ Voltar":
-                action.setEnabled(browser is not None and can_go_back and browser.url() != QUrl("https://www.google.com"))
+                # Modificado para desabilitar "Voltar" apenas se não houver histórico REAL, não só se for Google.
+                action.setEnabled(browser is not None and can_go_back)
             elif action.text() == "➡️ Avançar":
                 action.setEnabled(browser is not None and can_go_forward)
             elif action.text() == "🔄 Recarregar":
@@ -162,6 +168,16 @@ class MiniNavegador(QMainWindow):
             elif action.text() == "➕ Nova Guia":
                 action.setEnabled(True)
 
+    def update_progress_bar(self, progress):
+        """Atualiza a barra de progresso e a mostra/esconde."""
+        if progress < 100 and progress > 0:
+            self.progress_bar.setValue(progress)
+            self.progress_bar.setVisible(True)
+        elif progress == 100:
+            self.progress_bar.setVisible(False)
+        else: # progress == 0 (quando o carregamento começa)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
