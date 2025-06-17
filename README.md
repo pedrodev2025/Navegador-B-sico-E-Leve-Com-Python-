@@ -3,8 +3,7 @@
 Para usar Primeiro Baixe As dependências 
 ```bash
 sudo pacman -S python3 --noconfirm
-sudo pacman -S python3-pip --noconfirm
-sudo pacman -S python3-venv --noconfirm # Substitua pacman pelo seu gerenciador de pacotes e suas flags
+sudo pacman -S python-pip --noconfirm # Substitua pacman pelo seu gerenciador de pacotes e suas flags # a maioria das distros vem com o venv ja no pacote python mas algumas(especialmente debian/ubuntu) precisa instalar separadamente
 python3 -m venv ~/.venv
 source ~/.venv/bin/activate # se usa bash
 # source ~/.venv/bin/activate.fish # se usa fish
