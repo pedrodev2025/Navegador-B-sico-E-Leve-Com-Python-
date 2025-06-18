@@ -27,7 +27,7 @@ modules:
   - name: navegador-app
     buildsystem: simple
     build-commands:
-      - cp navegador.py /app/bin/
+       - cp navegador.py /app/bin/navegador.py
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop /app/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.png /app/share/icons/hicolor/512x512/apps/org.pedrodev2025.NavegadorPyTech.png
     sources:
