@@ -1,7 +1,7 @@
 # flatpak-build/org.pedrodev2025.NavegadorPyTech.yaml
 app-id: org.pedrodev2025.NavegadorPyTech
 runtime: org.kde.Platform
-runtime-version: '6.7'
+runtime-version: '6.7' # Ajuste se você instalou outra versão
 sdk: org.kde.Sdk
 command: python3 navegador.py
 
@@ -10,25 +10,29 @@ finish-args:
   - --socket=x11
   - --socket=wayland
   - --share=network
-  - --filesystem=home
+  - --filesystem=home # Ou mais específico se preferir
 
 modules:
   - name: python-dependencies
     buildsystem: simple
+    # A propriedade 'network: enabled' foi removida, pois não é suportada ou causa problemas.
+    # A rede agora funciona devido ao download offline das wheels.
     build-commands:
+      - pip3 install --user pip setuptools wheel
       # Instala as dependências PyQt5 e PyQtWebEngine dos arquivos baixados localmente
-      # O caminho absoluto para o diretório de build do módulo é /run/build/NOME_DO_MODULO/
-      # Então, os .whl estarão diretamente lá.
       - pip3 install --user --no-index --find-links=file:///run/build/python-dependencies/ PyQt5 PyQtWebEngine
     sources:
-      # O conteúdo de 'python_wheels' é copiado diretamente para /run/build/python-dependencies/
       - type: dir
-        path: ./python_wheels
+        path: ./python_wheels # Este caminho é relativo à pasta flatpak-build/
+
   - name: navegador-app
     buildsystem: simple
     build-commands:
-       - cp navegador.py /app/bin/navegador.py
+      # Copia o script Python para /app/bin/ com o nome completo
+      - cp navegador.py /app/bin/navegador.py
+      # Copia o arquivo .desktop para o local correto
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop /app/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
+      # Copia o ícone para o local correto
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.png /app/share/icons/hicolor/512x512/apps/org.pedrodev2025.NavegadorPyTech.png
     sources:
       - type: dir
