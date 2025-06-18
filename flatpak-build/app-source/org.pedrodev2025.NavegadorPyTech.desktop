@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Navegador Py-Tech
+Exec=navegador %U
+Icon=org.pedrodev2025.NavegadorPyTech
+Type=Application
+Categories=Network;WebBrowser;
+Comment=Um navegador básico e leve feito com Python e PyQt.
+Terminal=false

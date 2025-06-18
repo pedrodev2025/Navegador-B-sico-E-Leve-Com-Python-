@@ -1,0 +1,72 @@
+# .github/workflows/flatpak_build.yml
+
+name: Build Flatpak App
+
+on:
+  push:
+    branches:
+      - main # O workflow será executado a cada push na branch 'main' (ou 'master')
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # Usa a imagem mais recente do Ubuntu, que tem Flatpak e Python
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 # Baixa o código do seu repositório
+
+    - name: Install Flatpak and Flatpak Builder
+      run: |
+        sudo apt update
+        sudo apt install -y flatpak flatpak-builder # Instala as ferramentas Flatpak
+
+    - name: Install Flatpak Runtimes and SDKs
+      run: |
+        # Adiciona o repositório Flathub
+        flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+        # Instala o runtime e o SDK do KDE que seu manifesto usa
+        # Use --noninteractive para evitar prompts em ambientes CI
+        flatpak install --noninteractive flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
+        # Se for preciso, adicione outros runtimes/SDKs como org.freedesktop.Platform/23.08
+        # flatpak install --noninteractive flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+
+    - name: Organize Flatpak Build Directory
+      run: |
+        # Este passo recria a estrutura que você usa localmente
+        # flatpak-build/
+        #   org.pedrodev2025.NavegadorPyTech.yaml
+        #   app-source/
+        #     navegador.py
+        #     org.pedrodev2025.NavegadorPyTech.desktop
+        #     org.pedrodev2025.NavegadorPyTech.png
+
+        mkdir -p flatpak-build/app-source
+
+        # Move o código-fonte, o desktop file e o ícone para o subdiretório 'app-source'
+        # Assumindo que eles estão na raiz do seu repositório
+        #mv navegador.py flatpak-build/app-source/
+        #mv org.pedrodev2025.NavegadorPyTech.desktop flatpak-build/app-source/
+        #mv org.pedrodev2025.NavegadorPyTech.png flatpak-build/app-source/
+
+        # Copia o manifesto Flatpak para a pasta flatpak-build/
+        # Você precisará ter este arquivo 'org.pedrodev2025.NavegadorPyTech.yaml' na raiz do seu repositório
+        # OU ajusta o caminho abaixo se ele já estiver em flatpak-build/
+        # Se você o criou em flatpak-build/ no seu sistema local, ele já deve estar lá após o checkout.
+        # Apenas certifique-se de que o .yaml está no Git.
+
+    - name: Build Flatpak Application
+      run: |
+        # Navega para o diretório de build
+        cd flatpak-build
+        # Executa o flatpak-builder. Em um ambiente CI, a rede geralmente funciona sem problemas.
+        flatpak-builder --repo=./repo-final --force-clean build-dir org.pedrodev2025.NavegadorPyTech.yaml
+
+    - name: Upload Flatpak Repository as Artifact
+      uses: actions/upload-artifact@v4 # Uma action para fazer upload de arquivos
+      with:
+        name: Flatpak_NavegadorPyTech_Repo # Nome do artefato (zip)
+        path: flatpak-build/repo-final/ # O caminho da pasta do seu repositório Flatpak local
+        retention-days: 50 # Quanto tempo o artefato ficará disponível para download
