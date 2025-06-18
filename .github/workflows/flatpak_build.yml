@@ -5,68 +5,60 @@ name: Build Flatpak App
 on:
   push:
     branches:
-      - main # O workflow será executado a cada push na branch 'main' (ou 'master')
+      - main
   pull_request:
     branches:
       - main
 
 jobs:
   build:
-    runs-on: ubuntu-latest # Usa a imagem mais recente do Ubuntu, que tem Flatpak e Python
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4 # Baixa o código do seu repositório
+      uses: actions/checkout@v4
 
     - name: Install Flatpak and Flatpak Builder
       run: |
         sudo apt update
-        sudo apt install -y flatpak flatpak-builder # Instala as ferramentas Flatpak
+        sudo apt install -y flatpak flatpak-builder
 
     - name: Install Flatpak Runtimes and SDKs
       run: |
-        # Adiciona o repositório Flathub
         flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-        # Instala o runtime e o SDK do KDE que seu manifesto usa
-        # Use --noninteractive para evitar prompts em ambientes CI
-        flatpak install --noninteractive --user flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
-        # Se for preciso, adicione outros runtimes/SDKs como org.freedesktop.Platform/23.08
-        # flatpak install --noninteractive --user flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+        flatpak install --user --noninteractive flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
+
+    - name: Download Python Dependencies (Wheels) - NOVO PASSO
+      run: |
+        # Cria um diretório para os pacotes baixados
+        mkdir -p ./python_wheels
+        # Baixa os arquivos .whl para instalação offline.
+        # Usa --user para baixar para o diretório local de pacotes do usuário
+        # --no-deps para evitar baixar dependências de pacotes já disponíveis no runtime base
+        # É importante verificar as versões exatas de PyQt5 e PyQtWebEngine necessárias.
+        # Estas são versões comuns que podem funcionar com o runtime 6.7.
+        pip3 download --no-deps "PyQt5==5.15.11" "PyQtWebEngine==5.15.7" -d ./python_wheels
+      # Atenção: As versões 5.15.11 e 5.15.7 foram baseadas na sua instalação anterior.
+      # Se der erro, pode ser necessário ajustar a versão do PyQt para ser compatível com o Python do runtime Flatpak.
+      # O erro "Could not find a version that satisfies the requirement" pode ocorrer se a versão não existir para o Python 3.11.
 
     - name: Organize Flatpak Build Directory
       run: |
-        # Este passo recria a estrutura que você usa localmente
-        # flatpak-build/
-        #   org.pedrodev2025.NavegadorPyTech.yaml
-        #   app-source/
-        #     navegador.py
-        #     org.pedrodev2025.NavegadorPyTech.desktop
-        #     org.pedrodev2025.NavegadorPyTech.png
-
         mkdir -p flatpak-build/app-source
-
-        # Move o código-fonte, o desktop file e o ícone para o subdiretório 'app-source'
-        # Assumindo que eles estão na raiz do seu repositório
-        #mv navegador.py flatpak-build/app-source/
-        #mv org.pedrodev2025.NavegadorPyTech.desktop flatpak-build/app-source/
-        #mv org.pedrodev2025.NavegadorPyTech.png flatpak-build/app-source/
-
-        # Copia o manifesto Flatpak para a pasta flatpak-build/
-        # Você precisará ter este arquivo 'org.pedrodev2025.NavegadorPyTech.yaml' na raiz do seu repositório
-        # OU ajusta o caminho abaixo se ele já estiver em flatpak-build/
-        # Se você o criou em flatpak-build/ no seu sistema local, ele já deve estar lá após o checkout.
-        # Apenas certifique-se de que o .yaml está no Git.
+        mv navegador.py flatpak-build/app-source/
+        mv org.pedrodev2025.NavegadorPyTech.desktop flatpak-build/app-source/
+        mv org.pedrodev2025.NavegadorPyTech.png flatpak-build/app-source/
 
     - name: Build Flatpak Application
       run: |
         # Navega para o diretório de build
         cd flatpak-build
-        # Executa o flatpak-builder. Em um ambiente CI, a rede geralmente funciona sem problemas.
+        # Executa o flatpak-builder
         flatpak-builder --repo=./repo-final --force-clean build-dir org.pedrodev2025.NavegadorPyTech.yaml
 
     - name: Upload Flatpak Repository as Artifact
-      uses: actions/upload-artifact@v4 # Uma action para fazer upload de arquivos
+      uses: actions/upload-artifact@v4
       with:
-        name: Flatpak_NavegadorPyTech_Repo # Nome do artefato (zip)
-        path: flatpak-build/repo-final/ # O caminho da pasta do seu repositório Flatpak local
-        retention-days: 50 # Quanto tempo o artefato ficará disponível para download
+        name: Flatpak_NavegadorPyTech_Repo
+        path: flatpak-build/repo-final/
+        retention-days: 365
