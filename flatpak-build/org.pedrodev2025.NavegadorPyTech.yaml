@@ -3,7 +3,8 @@ app-id: org.pedrodev2025.NavegadorPyTech
 runtime: org.kde.Platform
 runtime-version: '6.7' # Ajuste se você instalou outra versão
 sdk: org.kde.Sdk
-command: python3 navegador.py
+command: start-navegador.sh # O novo script wrapper
+
 
 finish-args:
   - --share=ipc
@@ -25,14 +26,24 @@ modules:
       - type: dir
         path: ./python_wheels # Este caminho é relativo à pasta flatpak-build/
 
+
   - name: navegador-app
     buildsystem: simple
     build-commands:
-      # Copia o script Python para /app/bin/ com o nome completo
-      - install -Dm755 navegador.py /app/bin/navegador.py # <-- CORREÇÃO AQUI
-      # Copia o arquivo .desktop para o local correto
+      # Copia o script Python para /app/bin/
+      - install -Dm755 navegador.py /app/bin/navegador.py
+
+      # NOVO COMANDO: Criar o script wrapper e torná-lo executável
+      - | # O '|' permite escrever um bloco de texto multilinha
+        cat > /app/bin/start-navegador.sh << 'EOF'
+        #!/bin/bash
+        # Este é o script wrapper do Flatpak
+        # Executa o navegador.py com o interpretador python3 do ambiente Flatpak
+        python3 /app/bin/navegador.py "$@"
+        EOF
+      - chmod +x /app/bin/start-navegador.sh # Torna o script executável
+
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop /app/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
-      # Copia o ícone para o local correto
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.png /app/share/icons/hicolor/512x512/apps/org.pedrodev2025.NavegadorPyTech.png
     sources:
       - type: dir
