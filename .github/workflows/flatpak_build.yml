@@ -26,12 +26,12 @@ jobs:
     - name: Install Flatpak Runtimes and SDKs
       run: |
         # Adiciona o repositório Flathub
-        flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+        flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
         # Instala o runtime e o SDK do KDE que seu manifesto usa
         # Use --noninteractive para evitar prompts em ambientes CI
-        flatpak install --noninteractive flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
+        flatpak install --noninteractive --user flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
         # Se for preciso, adicione outros runtimes/SDKs como org.freedesktop.Platform/23.08
-        # flatpak install --noninteractive flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+        # flatpak install --noninteractive --user flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
 
     - name: Organize Flatpak Build Directory
       run: |
