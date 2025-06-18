@@ -29,7 +29,7 @@ modules:
     buildsystem: simple
     build-commands:
       # Copia o script Python para /app/bin/ com o nome completo
-      - cp navegador.py /app/bin/navegador.py
+      - install -Dm755 navegador.py /app/bin/navegador.py # <-- CORREÇÃO AQUI
       # Copia o arquivo .desktop para o local correto
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop /app/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
       # Copia o ícone para o local correto
