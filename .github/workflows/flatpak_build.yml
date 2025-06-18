@@ -37,7 +37,7 @@ jobs:
         # --no-deps para evitar baixar dependências de pacotes já disponíveis no runtime base
         # É importante verificar as versões exatas de PyQt5 e PyQtWebEngine necessárias.
         # Estas são versões comuns que podem funcionar com o runtime 6.7.
-        pip3 download --no-deps "PyQt5==5.15.11" "PyQtWebEngine==5.15.7" "PyQt5-sip==12.17.0" -d ./python_wheels
+        pip3 download "PyQt5==5.15.11" "PyQtWebEngine==5.15.7" "PyQt5-sip==12.17.0" -d ./python_wheels
         # Atenção: As versões 5.15.11 e 5.15.7 foram baseadas na sua instalação anterior.
       # Se der erro, pode ser necessário ajustar a versão do PyQt para ser compatível com o Python do runtime Flatpak.
       # O erro "Could not find a version that satisfies the requirement" pode ocorrer se a versão não existir para o Python 3.11.
