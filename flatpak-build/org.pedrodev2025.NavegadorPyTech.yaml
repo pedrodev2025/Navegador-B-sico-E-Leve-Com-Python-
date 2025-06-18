@@ -12,18 +12,18 @@ finish-args:
   - --share=network
   - --filesystem=home
 
-
 modules:
   - name: python-dependencies
     buildsystem: simple
     build-commands:
-      # pip, setuptools, wheel já são instalados pelo runtime, mas o comando não causa problemas.
-      # Remova a linha 'cat /etc/resolv.conf' se não precisar mais de depuração.
-      - pip3 install --user --no-index --find-links=file://. PyQt5 PyQtWebEngine
+      # Instala as dependências PyQt5 e PyQtWebEngine dos arquivos baixados localmente
+      # O caminho absoluto para o diretório de build do módulo é /run/build/NOME_DO_MODULO/
+      # Então, os .whl estarão diretamente lá.
+      - pip3 install --user --no-index --find-links=file:///run/build/python-dependencies/ PyQt5 PyQtWebEngine
     sources:
-      # O conteúdo de 'python_wheels' é copiado diretamente para o diretório de build do módulo.
+      # O conteúdo de 'python_wheels' é copiado diretamente para /run/build/python-dependencies/
       - type: dir
-        path: ./python_wheels # Este caminho é relativo à pasta flatpak-build/
+        path: ./python_wheels
   - name: navegador-app
     buildsystem: simple
     build-commands:
