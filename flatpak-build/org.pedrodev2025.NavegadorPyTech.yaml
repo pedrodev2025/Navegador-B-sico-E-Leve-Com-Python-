@@ -1,42 +1,42 @@
 # flatpak-build/org.pedrodev2025.NavegadorPyTech.yaml
 app-id: org.pedrodev2025.NavegadorPyTech
 runtime: org.kde.Platform
-runtime-version: '6.7' # Verifique se esta é a versão mais recente do org.kde.Platform
+runtime-version: '6.7'
 sdk: org.kde.Sdk
-command: python3 navegador.py # Agora, executamos o script Python diretamente
+command: python3 navegador.py
 
 finish-args:
   - --share=ipc
   - --socket=x11
   - --socket=wayland
   - --share=network
-  - --filesystem=home # Permissão geral, ou use as mais específicas abaixo:
-  # - --filesystem=xdg-download:rw
-  # - --filesystem=xdg-documents:rw
+  - --filesystem=home
 
 modules:
-  - name: python-dependencies # Módulo para instalar as dependências Python
+  - name: python-dependencies
     buildsystem: simple
+    # Remove 'network: enabled' pois não é suportado
     build-commands:
-      # testes de rede
-      # curl -v google.com
-      - cat /etc/resolv.conf
       # Instala pip, setuptools e wheel (boas práticas)
       - pip3 install --user pip setuptools wheel
-      # Instala as dependências PyQt5 e PyQtWebEngine
-      - pip3 install --user PyQt5 PyQtWebEngine
-    sources: [] # Não há código fonte para este módulo, pip baixa tudo
+      # Instala as dependências PyQt5 e PyQtWebEngine dos arquivos baixados localmente
+      # Usamos --no-index para que ele não tente ir para a internet
+      # Usamos --find-links para apontar para a pasta onde os .whl estão
+      # O caminho './python_wheels' é relativo ao diretório de checkout do módulo
+      # no ambiente de build do Flatpak.
+      - pip3 install --user --no-index --find-links=./python_wheels PyQt5 PyQtWebEngine
+    sources:
+      # Adicione uma nova fonte para a pasta com os .whl baixados
+      - type: dir
+        path: ./python_wheels # Este caminho é relativo à raiz do repositório (onde o build do GH Actions acontece)
+                              # Isso copiará a pasta 'python_wheels' para dentro do ambiente de build do módulo.
 
-  - name: navegador-app # Módulo para o seu aplicativo
+  - name: navegador-app
     buildsystem: simple
     build-commands:
-      # Copia o código-fonte do seu navegador para o diretório de instalação do Flatpak
       - cp -r navegador.py /app/bin/
-      # Copia o arquivo .desktop para o local correto
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop /app/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
-      # Copia o ícone para o local correto (512x512)
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.png /app/share/icons/hicolor/512x512/apps/org.pedrodev2025.NavegadorPyTech.png
     sources:
-      # Aponta para a raiz do seu repositório para pegar o script e os metadados
       - type: dir
         path: app-source/
