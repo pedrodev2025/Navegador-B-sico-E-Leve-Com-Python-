@@ -42,13 +42,6 @@ jobs:
       # Se der erro, pode ser necessário ajustar a versão do PyQt para ser compatível com o Python do runtime Flatpak.
       # O erro "Could not find a version that satisfies the requirement" pode ocorrer se a versão não existir para o Python 3.11.
 
-    - name: Organize Flatpak Build Directory
-      run: |
-        mkdir -p flatpak-build/app-source
-        mv navegador.py flatpak-build/app-source/
-        mv org.pedrodev2025.NavegadorPyTech.desktop flatpak-build/app-source/
-        mv org.pedrodev2025.NavegadorPyTech.png flatpak-build/app-source/
-
     - name: Build Flatpak Application
       run: |
         # Navega para o diretório de build
