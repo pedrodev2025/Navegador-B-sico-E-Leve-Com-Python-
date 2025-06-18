@@ -41,7 +41,10 @@ jobs:
       # Atenção: As versões 5.15.11 e 5.15.7 foram baseadas na sua instalação anterior.
       # Se der erro, pode ser necessário ajustar a versão do PyQt para ser compatível com o Python do runtime Flatpak.
       # O erro "Could not find a version that satisfies the requirement" pode ocorrer se a versão não existir para o Python 3.11.
-
+    - name: Organize folders
+      run: |
+        mv ./python_wheels flatpak-build/
+                 
     - name: Build Flatpak Application
       run: |
         # Navega para o diretório de build
