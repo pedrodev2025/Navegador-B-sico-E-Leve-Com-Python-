@@ -12,25 +12,18 @@ finish-args:
   - --share=network
   - --filesystem=home
 
+
 modules:
   - name: python-dependencies
     buildsystem: simple
-    # Remove 'network: enabled' pois não é suportado
     build-commands:
-      # Instala pip, setuptools e wheel (boas práticas)
-      - pip3 install --user pip setuptools wheel
-      # Instala as dependências PyQt5 e PyQtWebEngine dos arquivos baixados localmente
-      # Usamos --no-index para que ele não tente ir para a internet
-      # Usamos --find-links para apontar para a pasta onde os .whl estão
-      # O caminho './python_wheels' é relativo ao diretório de checkout do módulo
-      # no ambiente de build do Flatpak.
-      - pip3 install --user --no-index --find-links=./python_wheels PyQt5 PyQtWebEngine
+      # pip, setuptools, wheel já são instalados pelo runtime, mas o comando não causa problemas.
+      # Remova a linha 'cat /etc/resolv.conf' se não precisar mais de depuração.
+      - pip3 install --user --no-index --find-links=file://. PyQt5 PyQtWebEngine
     sources:
-      # Adicione uma nova fonte para a pasta com os .whl baixados
+      # O conteúdo de 'python_wheels' é copiado diretamente para o diretório de build do módulo.
       - type: dir
-        path: ./python_wheels # Este caminho é relativo à raiz do repositório (onde o build do GH Actions acontece)
-                              # Isso copiará a pasta 'python_wheels' para dentro do ambiente de build do módulo.
-
+        path: ./python_wheels # Este caminho é relativo à pasta flatpak-build/
   - name: navegador-app
     buildsystem: simple
     build-commands:
