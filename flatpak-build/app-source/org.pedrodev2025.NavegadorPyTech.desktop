@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Navegador Py-Tech
-Exec=navegador %U
+Exec=navegador.py %U
 Icon=org.pedrodev2025.NavegadorPyTech
 Type=Application
 Categories=Network;WebBrowser;
