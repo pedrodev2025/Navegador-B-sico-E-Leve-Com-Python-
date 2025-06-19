@@ -25,29 +25,28 @@ modules:
     sources:
       - type: dir
         path: ./python_wheels # Este caminho é relativo à pasta flatpak-build/
-  - name: navegador-app
+ - name: navegador-app
     buildsystem: simple
     build-commands:
-      - install -Dm755 navegador.py /app/bin/navegador.py
+      - install -Dm755 navegador.py $(FLATPAK_DEST)/bin/navegador.py
 
-      # ADICIONADO DEBUGGING NO SCRIPT WRAPPER
+      # NOVO COMANDO: Criar o script wrapper e torná-lo executável
+      # MODIFICAÇÃO AQUI: ADICIONAR O SEGUNDO CAMINHO AO PYTHONPATH
       - |
-        cat > /app/bin/start-navegador.sh << 'EOF'
+        cat > $(FLATPAK_DEST)/bin/start-navegador.sh << 'EOF'
         #!/bin/bash
-        # Define e imprime o PYTHONPATH
-        export PYTHONPATH="/app/lib/python3.11/site-packages:$PYTHONPATH"
+        # Tenta o caminho padrão do site-packages do runtime E o caminho comum para instalações --user
+        export PYTHONPATH="/app/lib/python3.11/site-packages:/app/share/python-packages:$PYTHONPATH"
         echo "DEBUG_FLATPAK: PYTHONPATH set to: $PYTHONPATH"
 
-        # Imprime o sys.path do Python para depuração
         python3 -c "import sys; print('DEBUG_FLATPAK: sys.path at runtime:'); print(sys.path)"
 
-        # Tenta executar o navegador
         python3 /app/bin/navegador.py "$@"
         EOF
-      - chmod +x /app/bin/start-navegador.sh
+      - chmod +x $(FLATPAK_DEST)/bin/start-navegador.sh # Torna o script executável
 
-      - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop /app/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
-      - install -Dm644 org.pedrodev2025.NavegadorPyTech.png /app/share/icons/hicolor/512x512/apps/org.pedrodev2025.NavegadorPyTech.png
+      - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop $(FLATPAK_DEST)/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
+      - install -Dm644 org.pedrodev2025.NavegadorPyTech.png $(FLATPAK_DEST)/share/icons/hicolor/512x512/apps/org.pedrodev2025.NavegadorPyTech.png
     sources:
       - type: dir
         path: app-source/
