@@ -27,24 +27,20 @@ modules:
 
   - name: navegador-app
     buildsystem: simple
-    build-commands:
-      # Copia o script Python para /app/bin/ com o nome completo
+ build-commands: # <--- COMEÇA AQUI
       - install -Dm755 navegador.py $(FLATPAK_DEST)/bin/navegador.py
-      # Copia o arquivo .desktop para o local correto
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop $(FLATPAK_DEST)/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
-      # Copia o ícone para o local correto
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.png $(FLATPAK_DEST)/share/icons/hicolor/512x512/apps/org.pedrodev2025.NavegadorPyTech.png
-      # Cria o script wrapper e o torna executável
       - |
         cat > $(FLATPAK_DEST)/bin/start-navegador.sh << 'EOF'
         #!/bin/bash
-        # Adiciona o caminho onde o pip instalou os pacotes ao PYTHONPATH
         export PYTHONPATH="/app/lib/python3.11/site-packages:/app/share/python-packages:$PYTHONPATH"
-        echo "DEBUG_FLATPAK: PYTHONPATH set to: $PYTHONPATH" # Manter para debug
-        python3 -c "import sys; print('DEBUG_FLATPAK: sys.path at runtime:'); print(sys.path)" # Manter para debug
-        python3 $(FLATPAK_DEST)/bin/navegador.py "$@" # Chama o script principal
+        echo "DEBUG_FLATPAK: PYTHONPATH set to: $PYTHONPATH"
+        python3 -c "import sys; print('DEBUG_FLATPAK: sys.path at runtime:'); print(sys.path)"
+        python3 $(FLATPAK_DEST)/bin/navegador.py "$@"
         EOF
-      - chmod +x $(FLATPAK_DEST)/bin/start-navegador.sh
+      - chmod +x $(FLATPAK_DEST)/bin/start-navegador.sh # <--- TERMINA AQUI
+
     sources:
       - type: dir
         path: app-source/
