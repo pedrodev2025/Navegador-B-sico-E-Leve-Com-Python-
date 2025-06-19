@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop">
+  <id>org.pedrodev2025.NavegadorPyTech</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license> <name>Navegador Py-Tech</name>
+  <summary>Um navegador básico e leve feito com Python e PyQt.</summary>
+
+  <description>
+    <p>
+      O Navegador Py-Tech é um navegador web simples e leve construído com Python e a biblioteca PyQt5, utilizando o QtWebEngine para renderização de páginas.
+      Ele oferece funcionalidades básicas de navegação, como abas, voltar, avançar, recarregar e página inicial.
+    </p>
+    <p>
+      Ideal para quem busca uma alternativa minimalista e de baixo consumo de recursos.
+    </p>
+  </description>
+
+  <screenshots>
+    </screenshots>
+
+  <url type="homepage">https://github.com/pedrodev2025/Navegador-B-sico-E-Leve-Com-Python-</url>
+  <url type="bugtracker">https://github.com/pedrodev2025/Navegador-B-sico-E-Leve-Com-Python-/issues</url>
+  <url type="help">https://github.com/pedrodev2025/Navegador-B-sico-E-Leve-Com-Python-/wiki</url>
+  <url type="repository">https://github.com/pedrodev2025/Navegador-B-sico-E-Leve-Com-Python-.git</url>
+
+  <provides>
+    <binary>navegador.py</binary> </provides>
+
+  <developer_name>Pedro Dev 2025</developer_name>
+  </component>
