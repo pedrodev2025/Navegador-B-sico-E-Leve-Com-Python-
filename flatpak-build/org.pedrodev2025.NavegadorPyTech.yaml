@@ -25,24 +25,26 @@ modules:
     sources:
       - type: dir
         path: ./python_wheels # Este caminho é relativo à pasta flatpak-build/
-
-
   - name: navegador-app
     buildsystem: simple
     build-commands:
-      # Copia o script Python para /app/bin/
       - install -Dm755 navegador.py /app/bin/navegador.py
 
-      # NOVO COMANDO: Criar o script wrapper e torná-lo executável
-      # MODIFICAÇÃO AQUI: Adicionar export PYTHONPATH
+      # ADICIONADO DEBUGGING NO SCRIPT WRAPPER
       - |
         cat > /app/bin/start-navegador.sh << 'EOF'
         #!/bin/bash
-        # Adiciona o caminho onde o pip instalou os pacotes ao PYTHONPATH
+        # Define e imprime o PYTHONPATH
         export PYTHONPATH="/app/lib/python3.11/site-packages:$PYTHONPATH"
+        echo "DEBUG_FLATPAK: PYTHONPATH set to: $PYTHONPATH"
+
+        # Imprime o sys.path do Python para depuração
+        python3 -c "import sys; print('DEBUG_FLATPAK: sys.path at runtime:'); print(sys.path)"
+
+        # Tenta executar o navegador
         python3 /app/bin/navegador.py "$@"
         EOF
-      - chmod +x /app/bin/start-navegador.sh # Torna o script executável
+      - chmod +x /app/bin/start-navegador.sh
 
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.desktop /app/share/applications/org.pedrodev2025.NavegadorPyTech.desktop
       - install -Dm644 org.pedrodev2025.NavegadorPyTech.png /app/share/icons/hicolor/512x512/apps/org.pedrodev2025.NavegadorPyTech.png
