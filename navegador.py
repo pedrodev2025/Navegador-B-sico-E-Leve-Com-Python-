@@ -1,7 +1,8 @@
 import sys
-from PyQt5.QtCore import *
-from PyQt5.QtWidgets import *
-from PyQt5.QtWebEngineWidgets import *
+from PyQt6.QtCore import QUrl, Qt # Alterado para PyQt6
+from PyQt6.QtWidgets import QApplication, QMainWindow, QToolBar, QLineEdit, QAction, QTabWidget, QProgressBar # Alterado para PyQt6
+from PyQt6.QtWebEngineWidgets import QWebEngineView # Alterado para PyQt6
+
 
 class BrowserTab(QWebEngineView):
     def __init__(self, parent=None):
@@ -18,6 +19,12 @@ class MiniNavegador(QMainWindow):
         # Barra de navegação (Toolbar)
         self.toolbar = QToolBar("Navegação")
         self.addToolBar(self.toolbar)
+
+        # Barra de progresso - INCLUSÃO DO PROGRESS BAR
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximumWidth(150)
+        self.progress_bar.setVisible(False)
+        self.toolbar.addWidget(self.progress_bar)
 
         # --- Suporte a Guias ---
         self.tabs = QTabWidget() # Primeiro, inicialize o QTabWidget
@@ -52,12 +59,6 @@ class MiniNavegador(QMainWindow):
         self.url_bar.returnPressed.connect(self.navigate_to_url)
         self.toolbar.addWidget(self.url_bar)
 
-        # Adiciona a barra de progresso aqui
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximumWidth(150) # Opcional: Define uma largura máxima
-        self.progress_bar.setVisible(False) # Começa invisível
-        self.toolbar.addWidget(self.progress_bar)
-
         # Botão para adicionar nova guia
         new_tab_btn = QAction("➕ Nova Guia", self)
         new_tab_btn.setStatusTip("Abrir uma nova guia")
@@ -86,12 +87,10 @@ class MiniNavegador(QMainWindow):
         i = self.tabs.addTab(browser, label)
         self.tabs.setCurrentIndex(i)
 
-        # Conecta o sinal loadProgress DO OBJETO browser criado AGORA
-        browser.loadProgress.connect(self.update_progress_bar)
-
         browser.urlChanged.connect(lambda qurl_obj, browser=browser: self.update_urlbar(qurl_obj, browser))
         browser.loadStarted.connect(lambda: self.update_buttons_state())
         browser.loadFinished.connect(lambda success: self.update_buttons_state())
+        browser.loadProgress.connect(self.update_progress_bar) # Conecta o sinal de progresso
 
         browser.titleChanged.connect(lambda title, browser=browser: self.tabs.setTabText(self.tabs.indexOf(browser), title))
 
@@ -128,12 +127,9 @@ class MiniNavegador(QMainWindow):
             if "." in url and not " " in url:
                 url = "https://" + url
             else:
-                # --- AQUI ESTÁ A CORREÇÃO ---
-                # Codifica o termo de busca para bytes e depois o decodifica para string normal antes de usar
                 search_query_bytes = QUrl.toPercentEncoding(url)
-                search_query_str = search_query_bytes.data().decode('utf-8') # Converte QByteArray para string UTF-8
+                search_query_str = search_query_bytes.data().decode('utf-8')
                 url = f"https://www.google.com/search?q={search_query_str}"
-                # ----------------------------
 
         browser.setUrl(QUrl(url))
         self.update_buttons_state()
@@ -157,7 +153,7 @@ class MiniNavegador(QMainWindow):
 
         for action in self.toolbar.actions():
             if action.text() == "⬅️ Voltar":
-                # Modificado para desabilitar "Voltar" apenas se não houver histórico REAL, não só se for Google.
+                # A condição foi simplificada para apenas 'can_go_back', pois o browser.url() != Google.com é muito restritivo para o botão Voltar
                 action.setEnabled(browser is not None and can_go_back)
             elif action.text() == "➡️ Avançar":
                 action.setEnabled(browser is not None and can_go_forward)
