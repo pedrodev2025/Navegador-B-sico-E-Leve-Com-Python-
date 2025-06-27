@@ -1,8 +1,7 @@
 import sys
-# ALTERADO: De PyQt6 para PySide6
-from PySide6.QtCore import QUrl, Qt
-from PySide6.QtWidgets import QApplication, QMainWindow, QToolBar, QLineEdit, QAction, QTabWidget, QProgressBar
-from PySide6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtCore import QUrl, Qt # Alterado para PyQt6
+from PyQt6.QtWidgets import QApplication, QMainWindow, QToolBar, QLineEdit, QAction, QTabWidget, QProgressBar # Alterado para PyQt6
+from PyQt6.QtWebEngineWidgets import QWebEngineView # Alterado para PyQt6
 
 
 class BrowserTab(QWebEngineView):
@@ -154,6 +153,7 @@ class MiniNavegador(QMainWindow):
 
         for action in self.toolbar.actions():
             if action.text() == "⬅️ Voltar":
+                # A condição foi simplificada para apenas 'can_go_back', pois o browser.url() != Google.com é muito restritivo para o botão Voltar
                 action.setEnabled(browser is not None and can_go_back)
             elif action.text() == "➡️ Avançar":
                 action.setEnabled(browser is not None and can_go_forward)
@@ -180,4 +180,4 @@ if __name__ == "__main__":
     QApplication.setApplicationName("Navegador Py-Tech")
     navegador = MiniNavegador()
     navegador.show()
-    sys.exit(app.exec()) # Alterado de app.exec_() para app.exec()
+    sys.exit(app.exec_())
