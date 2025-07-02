@@ -3,12 +3,11 @@ import os
 from PyQt6.QtCore import QUrl, Qt
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QLineEdit, QTabWidget,
-    QProgressBar, QAction, QDialog, QVBoxLayout, QPushButton,
-    QLabel, QInputDialog, QListWidget, QListWidgetItem, QHBoxLayout
+    QProgressBar, QDialog, QVBoxLayout, QPushButton, # AQUI: QAction foi removido
+    QLabel, QInputDialog, QListWidget, QListWidgetItem, QHBoxLayout, QMessageBox
 )
-from PyQt6.QtGui import QAction # Re-importar para garantir, embora já esteja lá
+from PyQt6.QtGui import QAction # ESTA linha deve permanecer como está
 from PyQt6.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile
-
 # Diretório base onde todos os perfis serão armazenados
 BASE_PROFILES_DIR = os.path.join(os.path.expanduser("~"), ".config", "navegador_pytech_profiles")
 
