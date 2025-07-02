@@ -1,7 +1,7 @@
 import sys
 from PyQt6.QtCore import QUrl, Qt # Alterado para PyQt6
-from PyQt6.QtWidgets import QApplication, QMainWindow, QToolBar, QLineEdit, QAction, QTabWidget, QProgressBar # Alterado para PyQt6
-from PyQt6.QtWebEngineWidgets import QWebEngineView # Alterado para PyQt6
+from PyQt6.QtWidgets import QApplication, QMainWindow, QToolBar, QLineEdit, QTabWidget, QProgressBar
+from PyQt6.QtGui import QAction # QAction agora vem de QtGui no PyQt6
 
 
 class BrowserTab(QWebEngineView):
