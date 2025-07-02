@@ -8,7 +8,7 @@ python3 -m venv ~/.venv
 source ~/.venv/bin/activate # se usa bash
 # source ~/.venv/bin/activate.fish # se usa fish
 # source ~/.venv/bin/activate.ps1 # se usa powershell
-pip install PyQt6 PyQtWebEngine
+pip install PyQt6 PyQt6-WebEngine
 ```
 depois baixe o navegador
 ```bash
