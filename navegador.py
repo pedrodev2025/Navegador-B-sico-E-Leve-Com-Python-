@@ -1,330 +1,457 @@
 import sys
 import os
-from PyQt6.QtCore import QUrl, Qt
-from PyQt6.QtWidgets import (
+import shutil
+import platform
+from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QLineEdit, QTabWidget,
-    QProgressBar, QDialog, QVBoxLayout, QPushButton, # AQUI: QAction foi removido
-    QLabel, QInputDialog, QListWidget, QListWidgetItem, QHBoxLayout, QMessageBox
+    QProgressBar, QDialog, QVBoxLayout, QPushButton,
+    QLabel, QInputDialog, QListWidget, QListWidgetItem, QHBoxLayout, QMessageBox,
+    QAction, QWidget
 )
-from PyQt6.QtGui import QAction # ESTA linha deve permanecer como está
-from PyQt6.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile
-# Diretório base onde todos os perfis serão armazenados
-BASE_PROFILES_DIR = os.path.join(os.path.expanduser("~"), ".config", "navegador_pytech_profiles")
+from PyQt5.QtGui import QIcon # QIcon ainda é do PyQt para ícones na UI
+from PyQt5.QtCore import QUrl, Qt, QTimer, pyqtSlot
 
-class ProfileSelectorDialog(QDialog):
-    def __init__(self, parent=None):
+# Importa o CEF
+# Certifique-se de que cefpython está instalado: pip install cefpython3
+from cefpython3 import cefpython as cef
+
+# Certifique-se de que os processos CEF são executados no processo principal da GUI para evitar problemas no Linux
+# Isso é uma boa prática para evitar crashes em algumas configurações
+# No Linux, os processos filhos do CEF podem ter problemas se o main_loop não for executado no processo principal.
+# if platform.system() == "Linux":
+#     cef.WindowUtils.Set
+#     cef.cef_set_global_scheme_handler_factory()
+#     cef.cef_execute_process()
+
+# Configurações globais do CEF (opcional, para depuração ou otimização)
+settings = {
+    "log_severity": cef.LogSeverity.INFO,
+    "log_file": "debug_cef.log",
+    "browser_subprocess_path": "%s/%s" % (cef.GetModuleDirectory(), "subprocess"),
+    "persist_session_cookies": True, # Para manter cookies de sessão
+}
+
+class CefBrowserWidget(QWidget):
+    def __init__(self, parent=None, profile_path=None):
         super().__init__(parent)
-        self.setWindowTitle("Selecionar Perfil")
-        self.setGeometry(300, 300, 400, 300)
-        self.selected_profile_name = None
-        self.profile_path = None
+        self.browser = None
+        self.profile_path = profile_path
+        self.parent_window = parent # Referência à BrowserWindow para callbacks
+        self.url_bar = None # Será definido pela BrowserWindow
 
-        self.init_ui()
-        self.load_profiles()
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0) # Sem margens para o browser preencher o espaço
 
-    def init_ui(self):
-        layout = QVBoxLayout()
+        self.original_url_sent_by_user = None # Para gerenciar a URL na barra de endereços
 
-        label = QLabel("Escolha um perfil ou crie um novo:")
-        layout.addWidget(label)
+    def create_browser(self):
+        # As configurações específicas para o profile (user_data_path)
+        # devem ser passadas no momento da criação do browser.
+        # cef.RequestContextSettings() permite definir o path do perfil.
+        request_context_settings = {}
+        if self.profile_path:
+            request_context_settings["user_data_path"] = self.profile_path
+            print(f"CEF Browser usando user_data_path: {self.profile_path}")
 
-        self.profile_list_widget = QListWidget()
-        self.profile_list_widget.itemDoubleClicked.connect(self.accept_selection)
-        layout.addWidget(self.profile_list_widget)
+        # Cria um RequestContext com as configurações do perfil
+        request_context = cef.RequestContext(request_context_settings)
 
-        button_layout = QHBoxLayout()
-        self.create_profile_btn = QPushButton("Criar Novo Perfil")
-        self.create_profile_btn.clicked.connect(self.create_new_profile)
-        button_layout.addWidget(self.create_profile_btn)
+        window_info = cef.WindowInfo()
+        # No Linux, precisa do id da janela ou um xid
+        # No Windows/macOS, pode ser o handle da janela.
+        # Aqui, estamos usando a integração com PyQt.
+        if platform.system() == "Windows":
+            window_info.SetAsChild(self.winId())
+        elif platform.system() == "Linux":
+            window_info.SetAsChild(self.winId())
+        elif platform.system() == "Darwin":
+            window_info.SetAsOffScreen(self.winId()) # macOS precisa de offscreen rendering para embedar no PyQt5
 
-        self.select_profile_btn = QPushButton("Abrir Perfil Selecionado")
-        self.select_profile_btn.clicked.connect(self.accept_selection)
-        self.select_profile_btn.setEnabled(False) # Desabilitado até um item ser selecionado
-        button_layout.addWidget(self.select_profile_btn)
+        # Cria o navegador CEF
+        self.browser = cef.CreateBrowserSync(window_info, url="https://google.com",
+                                             request_context=request_context)
 
-        # Conectar para habilitar/desabilitar o botão de seleção
-        self.profile_list_widget.itemSelectionChanged.connect(self.toggle_select_button)
-
-        layout.addLayout(button_layout)
-        self.setLayout(layout)
-
-    def toggle_select_button(self):
-        self.select_profile_btn.setEnabled(len(self.profile_list_widget.selectedItems()) > 0)
-
-    def load_profiles(self):
-        self.profile_list_widget.clear()
+        # Conecta os handlers para eventos do navegador
+        self.browser.SetClientHandler(LoadHandler(self.parent_window, self))
+        self.browser.SetClientHandler(DisplayHandler(self.parent_window, self))
+        self.browser.SetClientHandler(LifeSpanHandler(self.parent_window, self)) # Para novas janelas/abas
         
-        # Adicionar o modo Convidado
-        guest_item = QListWidgetItem("Convidado (Não Salva Dados)")
-        guest_item.setData(Qt.ItemDataRole.UserRole, "guest")
-        self.profile_list_widget.addItem(guest_item)
-
-        # Carregar perfis permanentes
-        os.makedirs(BASE_PROFILES_DIR, exist_ok=True)
-        for profile_dir in os.listdir(BASE_PROFILES_DIR):
-            full_path = os.path.join(BASE_PROFILES_DIR, profile_dir)
-            if os.path.isdir(full_path):
-                profile_item = QListWidgetItem(profile_dir)
-                profile_item.setData(Qt.ItemDataRole.UserRole, profile_dir)
-                self.profile_list_widget.addItem(profile_item)
-        
-        # Selecionar o modo Convidado por padrão
-        self.profile_list_widget.setCurrentItem(guest_item)
+        # Redimensiona o navegador CEF quando o widget é redimensionado
+        self.browser.SetBounds(0, 0, self.width(), self.height())
+        self.size_timer = QTimer(self)
+        self.size_timer.timeout.connect(self.on_size_timeout)
+        self.size_timer.setSingleShot(True)
 
 
-    def create_new_profile(self):
-        name, ok = QInputDialog.getText(self, "Novo Perfil", "Nome do novo perfil:")
-        if ok and name:
-            name = name.strip()
-            if not name:
-                return # Não criar perfil com nome vazio
-            profile_dir = os.path.join(BASE_PROFILES_DIR, name)
-            if os.path.exists(profile_dir):
-                # Mensagem de erro simples, poderia ser um QMessageBox
-                QMessageBox.warning(self, "Erro", "Perfil com este nome já existe.")
-                return
+    def on_size_timeout(self):
+        if self.browser:
+            self.browser.SetBounds(0, 0, self.width(), self.height())
+    
+    def resizeEvent(self, event):
+        # Atrasar o redimensionamento para evitar repinturas excessivas
+        self.size_timer.start(100) # 100ms de atraso
+        super().resizeEvent(event)
 
-            os.makedirs(profile_dir, exist_ok=True)
-            self.load_profiles() # Recarrega a lista para mostrar o novo perfil
-            # Seleciona o novo perfil na lista
-            for i in range(self.profile_list_widget.count()):
-                item = self.profile_list_widget.item(i)
-                if item.text() == name:
-                    self.profile_list_widget.setCurrentItem(item)
-                    break
+    def closeEvent(self, event):
+        if self.browser:
+            self.browser.CloseBrowser(True)
+            self.browser = None
+        super().closeEvent(event)
+
+    def load_url(self, url):
+        if self.browser:
+            self.original_url_sent_by_user = url # Armazena a URL que o usuário digitou
+            self.browser.LoadUrl(url)
+    
+    def go_back(self):
+        if self.browser:
+            self.browser.GoBack()
+
+    def go_forward(self):
+        if self.browser:
+            self.browser.GoForward()
+
+    def reload(self):
+        if self.browser:
+            self.browser.Reload()
+
+# --- Handlers CEF (para interagir com eventos do navegador) ---
+
+class LoadHandler(object):
+    def __init__(self, main_window, browser_widget):
+        self.main_window = main_window
+        self.browser_widget = browser_widget
+
+    def OnLoadStart(self, browser, frame, transition_type):
+        if frame.IsMain(): # Apenas para o frame principal
+            # No CEF, OnLoadStart pode ser chamado antes de OnAddressChange
+            # e a URL pode não ser a URL final, mas a que iniciou o carregamento.
+            # Usaremos OnAddressChange para a URL da barra.
+            pass
+
+    def OnLoadEnd(self, browser, frame, http_status_code):
+        if frame.IsMain():
+            # Atualiza a barra de progresso
+            QApplication.instance().processEvents() # Garante que a UI responda
+            self.main_window.update_progress(100, self.browser_widget)
+            self.main_window.url_bar.setText(browser.GetUrl()) # Garante URL final
+
+    def OnLoadError(self, browser, frame, error_code, error_text, failed_url):
+        if frame.IsMain():
+            print(f"Load Error: {error_code} - {error_text} for {failed_url}")
+            # Exibe um erro na barra de URL
+            self.main_window.url_bar.setText(f"Erro: {error_text} - {failed_url}")
+            self.main_window.update_progress(0, self.browser_widget)
 
 
-    def accept_selection(self):
-        selected_items = self.profile_list_widget.selectedItems()
-        if selected_items:
-            self.selected_profile_name = selected_items[0].data(Qt.ItemDataRole.UserRole)
-            self.accept()
+class DisplayHandler(object):
+    def __init__(self, main_window, browser_widget):
+        self.main_window = main_window
+        self.browser_widget = browser_widget
 
-# As classes BrowserTab e MiniNavegador precisam ser ajustadas para usar o perfil selecionado.
-# A classe BrowserTab agora recebe um objeto QWebEngineProfile
-class BrowserTab(QWebEngineView):
-    def __init__(self, profile, parent=None):
-        super().__init__(parent)
-        self.setPage(QWebEngineView().page()) # Cria uma nova página para associar o perfil
-        self.page().setProfile(profile) # Associa o perfil à página
-        self.load(QUrl("https://www.google.com")) # Página inicial padrão para cada nova guia
+    def OnAddressChange(self, browser, frame, url):
+        # Atualiza a URL na barra de endereços apenas para a aba atual
+        if self.browser_widget == self.main_window.tab_widget.currentWidget():
+            self.main_window.url_bar.setText(url)
+            self.main_window.url_bar.setCursorPosition(0)
+            self.main_window.update_progress(0, self.browser_widget) # Reset progress for new load
 
-class MiniNavegador(QMainWindow):
-    def __init__(self, selected_profile_name="guest"):
+    def OnTitleChange(self, browser, title):
+        # Atualiza o título da aba
+        if self.browser_widget == self.main_window.tab_widget.currentWidget():
+            index = self.main_window.tab_widget.indexOf(self.browser_widget)
+            if index != -1:
+                self.main_window.tab_widget.setTabText(index, title or "Nova Aba")
+
+    def OnLoadingProgressChange(self, browser, progress):
+        # Atualiza a barra de progresso
+        if self.browser_widget == self.main_window.tab_widget.currentWidget():
+            self.main_window.update_progress(int(progress * 100), self.browser_widget)
+
+class LifeSpanHandler(object):
+    def __init__(self, main_window, browser_widget):
+        self.main_window = main_window
+        self.browser_widget = browser_widget
+
+    def OnBeforePopup(self, browser, frame, target_url, target_frame_name,
+                      target_disposition, user_gesture, popup_features, window_info,
+                      client, is_popup):
+        # Lida com pop-ups e novas janelas abrindo em novas abas
+        print(f"OnBeforePopup: {target_url}")
+        self.main_window.add_new_tab(QUrl(target_url))
+        return True # Retorna True para cancelar a criação da nova janela pelo CEF
+
+
+# --- Classe Principal da Janela ---
+
+class BrowserWindow(QMainWindow):
+    def __init__(self):
         super().__init__()
+        self.setWindowTitle("Navegador PyTech 3 (CEFPython)")
+        self.setGeometry(100, 100, 1024, 768)
 
-        self.setWindowTitle("Navegador Py-Tech")
-        self.resize(1200, 800)
+        self.data_dir = os.path.join(os.path.expanduser('~'), '.navegadorpytech3_cef_data')
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.profiles_file = os.path.join(self.data_dir, 'profiles.txt')
 
-        # --- Configuração do Perfil de Navegação ---
-        self.profile = self.get_or_create_profile(selected_profile_name)
+        self.profiles = self.load_profiles()
+        self.current_profile_name = "default"
+        self.active_profile_path = None # Caminho completo do perfil CEF
 
-        # Barra de navegação (Toolbar)
-        self.toolbar = QToolBar("Navegação")
-        self.addToolBar(self.toolbar)
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
+        self.tab_widget.currentChanged.connect(self.current_tab_changed)
+        self.tab_widget.tabCloseRequested.connect(self.close_current_tab)
+        self.tab_widget.setTabsClosable(True)
 
-        # Barra de progresso
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximumWidth(150)
-        self.progress_bar.setVisible(False)
-        self.toolbar.addWidget(self.progress_bar)
+        self.create_toolbar()
 
-        # --- Suporte a Guias ---
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        self.tabs.tabBarDoubleClicked.connect(self.tab_open_doubleclick)
-        self.tabs.currentChanged.connect(self.current_tab_changed)
-        self.setCentralWidget(self.tabs)
+        self.add_profile_if_none_exists()
+        self.open_profile_selector()
 
-        # Botões da barra de navegação
-        back_btn = QAction("⬅️ Voltar", self)
-        back_btn.setStatusTip("Voltar para a página anterior")
-        back_btn.triggered.connect(lambda: self.current_browser().back())
-        self.toolbar.addAction(back_btn)
+        # Inicia o timer CEF para processar eventos
+        self.cef_timer = QTimer(self)
+        self.cef_timer.timeout.connect(self.cef_message_loop)
+        self.cef_timer.start(10) # 10ms é um bom intervalo para o message loop
 
-        forward_btn = QAction("➡️ Avançar", self)
-        forward_btn.setStatusTip("Avançar para a próxima página")
-        forward_btn.triggered.connect(lambda: self.current_browser().forward())
-        self.toolbar.addAction(forward_btn)
 
-        reload_btn = QAction("🔄 Recarregar", self)
-        reload_btn.setStatusTip("Recarregar a página atual")
-        reload_btn.triggered.connect(lambda: self.current_browser().reload())
-        self.toolbar.addAction(reload_btn)
+    def cef_message_loop(self):
+        cef.MessageLoopWork() # Necessário para o CEF funcionar corretamente
 
-        home_btn = QAction("🏠 Início", self)
-        home_btn.setStatusTip("Ir para a página inicial")
-        home_btn.triggered.connect(self.navigate_home)
-        self.toolbar.addAction(home_btn)
+    def create_toolbar(self):
+        toolbar = QToolBar("Navegação")
+        self.addToolBar(toolbar)
+
+        back_button = QAction(QIcon.fromTheme("go-previous"), "<- Voltar", self)
+        back_button.triggered.connect(self.go_back)
+        toolbar.addAction(back_button)
+
+        forward_button = QAction(QIcon.fromTheme("go-next"), "Avançar ->", self)
+        forward_button.triggered.connect(self.go_forward)
+        toolbar.addAction(forward_button)
+
+        reload_button = QAction(QIcon.fromTheme("view-refresh"), "Recarregar", self)
+        reload_button.triggered.connect(self.reload)
+        toolbar.addAction(reload_button)
+
+        home_button = QAction(QIcon.fromTheme("go-home"), "Home", self)
+        home_button.triggered.connect(self.navigate_home)
+        toolbar.addAction(home_button)
 
         self.url_bar = QLineEdit()
         self.url_bar.returnPressed.connect(self.navigate_to_url)
-        self.toolbar.addWidget(self.url_bar)
+        toolbar.addWidget(self.url_bar)
 
-        # Botão para adicionar nova guia
-        new_tab_btn = QAction("➕ Nova Guia", self)
-        new_tab_btn.setStatusTip("Abrir uma nova guia")
-        new_tab_btn.triggered.connect(lambda: self.add_new_tab())
-        self.toolbar.addAction(new_tab_btn)
-        
-        # Botão para trocar ou criar perfil (NOVO)
-        profile_btn = QAction(f"👤 {selected_profile_name}", self)
-        profile_btn.setStatusTip("Gerenciar perfis")
-        profile_btn.triggered.connect(self.show_profile_selector)
-        self.toolbar.addAction(profile_btn)
-        self.profile_action_button = profile_btn # Salvar referência para atualizar texto
+        new_tab_button = QAction(QIcon.fromTheme("tab-new"), "+ Nova Aba", self)
+        new_tab_button.triggered.connect(self.add_new_tab)
+        toolbar.addAction(new_tab_button)
 
-        # Adiciona a primeira aba com o perfil selecionado
-        self.add_new_tab(QUrl("https://www.google.com"), "Página Inicial")
-        self.update_buttons_state()
+        profile_button = QAction(QIcon.fromTheme("system-users"), "Perfis", self)
+        profile_button.triggered.connect(self.open_profile_selector)
+        toolbar.addAction(profile_button)
 
-        self.statusBar().hide()
-    
-    def get_or_create_profile(self, profile_name):
-        if profile_name == "guest":
-            # Perfil convidado não persistente
-            return QWebEngineProfile("GuestProfile", self) # Sem path de persistência
-        else:
-            # Perfil persistente para o usuário
-            profile_path = os.path.join(BASE_PROFILES_DIR, profile_name)
-            os.makedirs(profile_path, exist_ok=True)
-            profile = QWebEngineProfile(profile_name, self)
-            profile.setPersistentStoragePath(profile_path)
-            profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
-            return profile
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximumWidth(150)
+        self.progress_bar.setVisible(False)
+        toolbar.addWidget(self.progress_bar)
 
-    def show_profile_selector(self):
-        # Implementação simples para mostrar o seletor novamente,
-        # mas para trocar o perfil em tempo de execução, seria mais complexo
-        # envolvendo fechar e reabrir o navegador com o novo perfil.
-        # Por simplicidade, este botão pode simplesmente reabrir o seletor,
-        # e o usuário precisaria reiniciar o navegador para que a troca de perfil tenha efeito completo.
-        # Ou você pode implementar uma lógica para reiniciar a aplicação aqui.
-        print("Botão de perfil clicado. Reinicie o navegador para trocar de perfil.")
-        # Se quiser fazer a troca dinâmica, precisaria recriar a QApplication e o MiniNavegador
-        # que é mais complexo em PyQt. Uma forma mais simples é fechar e pedir para o usuário reiniciar.
-        # Ou, idealmente, você criaria uma nova janela do navegador com o perfil selecionado.
-        
-        dialog = ProfileSelectorDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            selected_name = dialog.selected_profile_name
-            if selected_name and selected_name != self.profile.name(): # Se um novo perfil foi selecionado
-                print(f"Novo perfil selecionado: {selected_name}. Por favor, reinicie o navegador para aplicar.")
-                # Opção 1: Mensagem e Reiniciar Manualmente
-                QMessageBox.information(self, "Trocar Perfil", 
-                                        f"Você selecionou o perfil '{selected_name}'.\n"
-                                        "Por favor, feche e reabra o navegador para usar este perfil.")
-                # Opção 2: Reiniciar a Aplicação Programaticamente (mais complexo)
-                # self.close()
-                # self.app.exit(0) # Termina a aplicação atual
-                # sys.exit(0) # Sai do script
-
-    def current_browser(self):
-        if self.tabs.count() > 0:
-            return self.tabs.currentWidget()
-        return None
-
-    def add_new_tab(self, qurl=None, label="Nova Guia"):
-        if qurl is None or isinstance(qurl, bool):
-            qurl = QUrl("https://www.google.com")
-
-        browser = BrowserTab(self.profile) # Passa o perfil configurado
-        browser.setUrl(qurl)
-
-        i = self.tabs.addTab(browser, label)
-        self.tabs.setCurrentIndex(i)
-
-        browser.urlChanged.connect(lambda qurl_obj, browser=browser: self.update_urlbar(qurl_obj, browser))
-        browser.loadStarted.connect(lambda: self.update_buttons_state())
-        browser.loadFinished.connect(lambda success: self.update_buttons_state())
-        browser.loadProgress.connect(self.update_progress_bar)
-
-        browser.titleChanged.connect(lambda title, browser=browser: self.tabs.setTabText(self.tabs.indexOf(browser), title))
-
-    def tab_open_doubleclick(self, index):
-        if index == -1:
-            self.add_new_tab()
-
-    def current_tab_changed(self, index):
-        browser = self.current_browser()
-        if browser:
-            qurl = browser.url()
-            self.update_urlbar(qurl, browser)
-            self.update_buttons_state()
-
-    def navigate_home(self):
-        browser = self.current_browser()
-        if browser:
-            browser.setUrl(QUrl("https://www.google.com"))
-
-    def navigate_to_url(self):
-        url = self.url_bar.text()
-        browser = self.current_browser()
-        if not browser:
+    @pyqtSlot(QUrl, str)
+    @pyqtSlot(str, str)
+    def add_new_tab(self, qurl=None, label="Nova Aba", profile_path=None):
+        if self.active_profile_path is None:
+            QMessageBox.critical(self, "Erro de Perfil", "Nenhum perfil selecionado. Por favor, selecione ou crie um perfil.")
             return
 
-        if not url.startswith("http://") and not url.startswith("https://"):
-            if "." in url and not " " in url:
-                url = "https://" + url
-            else:
-                search_query_bytes = QUrl.toPercentEncoding(url)
-                search_query_str = search_query_bytes.data().decode('utf-8')
-                url = f"https://www.google.com/search?q={search_query_str}"
+        # Passa o caminho do perfil para o widget do navegador CEF
+        browser_widget = CefBrowserWidget(self, profile_path=self.active_profile_path)
+        browser_widget.url_bar = self.url_bar # Passa a referência da url_bar
 
-        browser.setUrl(QUrl(url))
-        self.update_buttons_state()
+        i = self.tab_widget.addTab(browser_widget, label)
+        self.tab_widget.setCurrentIndex(i)
 
-    def update_urlbar(self, q, browser=None):
-        if browser is None or browser == self.current_browser():
-            self.url_bar.setText(q.toString())
+        browser_widget.create_browser() # Cria o navegador CEF dentro do widget
+
+        # Define a URL inicial
+        if qurl is None:
+            browser_widget.load_url('https://google.com')
+            self.url_bar.setText('https://google.com')
+        else:
+            browser_widget.load_url(qurl.toString() if isinstance(qurl, QUrl) else qurl)
+            self.url_bar.setText(qurl.toString() if isinstance(qurl, QUrl) else qurl)
+        
+        # Conecta o sinal urlChanged que será emitido pelo LoadHandler
+        # (Isso é feito via o handler no CEF, não diretamente no QWebEngineView)
+
+    def navigate_home(self):
+        current_browser = self.tab_widget.currentWidget()
+        if current_browser and isinstance(current_browser, CefBrowserWidget):
+            current_browser.load_url('https://google.com')
+
+    def navigate_to_url(self):
+        current_browser = self.tab_widget.currentWidget()
+        if current_browser and isinstance(current_browser, CefBrowserWidget):
+            url_text = self.url_bar.text()
+            if not url_text.startswith(('http://', 'https://')):
+                url_text = 'http://' + url_text # Adiciona esquema padrão
+            current_browser.load_url(url_text)
+
+    def update_urlbar(self, url, browser_widget=None):
+        if browser_widget == self.tab_widget.currentWidget():
+            self.url_bar.setText(url)
             self.url_bar.setCursorPosition(0)
 
-    def update_buttons_state(self):
-        browser = self.current_browser()
-        if browser:
-            history = browser.history()
-            can_go_back = history.canGoBack()
-            can_go_forward = history.canGoForward()
+    def update_progress(self, progress, browser_widget=None):
+        if browser_widget == self.tab_widget.currentWidget():
+            if progress == 100:
+                self.progress_bar.setVisible(False)
+            else:
+                self.progress_bar.setVisible(True)
+                self.progress_bar.setValue(progress)
+
+    def current_tab_changed(self, index):
+        if index != -1:
+            browser_widget = self.tab_widget.widget(index)
+            if browser_widget and isinstance(browser_widget, CefBrowserWidget) and browser_widget.browser:
+                # Obtém a URL atual do browser CEF e atualiza a barra
+                self.url_bar.setText(browser_widget.browser.GetUrl())
+                self.url_bar.setCursorPosition(0)
+                self.update_progress(0, browser_widget) # Reseta a barra ao mudar de aba
+
+    def close_current_tab(self, index):
+        if self.tab_widget.count() < 2:
+            self.close()
         else:
-            can_go_back = False
-            can_go_forward = False
+            browser_widget_to_close = self.tab_widget.widget(index)
+            if browser_widget_to_close and isinstance(browser_widget_to_close, CefBrowserWidget):
+                browser_widget_to_close.closeEvent(None) # Garante que o CEF seja fechado corretamente
+            self.tab_widget.removeTab(index)
 
-        for action in self.toolbar.actions():
-            if action.text() == "⬅️ Voltar":
-                action.setEnabled(browser is not None and can_go_back)
-            elif action.text() == "➡️ Avançar":
-                action.setEnabled(browser is not None and can_go_forward)
-            elif action.text() == "🔄 Recarregar":
-                action.setEnabled(browser is not None)
-            elif action.text() == "🏠 Início":
-                action.setEnabled(browser is not None)
-            elif action.text() == "➕ Nova Guia":
-                action.setEnabled(True)
-        # Atualiza o nome do perfil no botão
-        self.profile_action_button.setText(f"👤 {self.profile.name()}")
+    def go_back(self):
+        current_browser = self.tab_widget.currentWidget()
+        if current_browser and isinstance(current_browser, CefBrowserWidget):
+            current_browser.go_back()
+
+    def go_forward(self):
+        current_browser = self.tab_widget.currentWidget()
+        if current_browser and isinstance(current_browser, CefBrowserWidget):
+            current_browser.go_forward()
+
+    def reload(self):
+        current_browser = self.tab_widget.currentWidget()
+        if current_browser and isinstance(current_browser, CefBrowserWidget):
+            current_browser.reload()
+
+    # --- Funções de gerenciamento de perfis ---
+
+    def load_profiles(self):
+        profiles = {}
+        if os.path.exists(self.profiles_file):
+            with open(self.profiles_file, 'r') as f:
+                for line in f:
+                    name = line.strip()
+                    if name:
+                        profiles[name] = True
+        return profiles
+
+    def save_profiles(self):
+        with open(self.profiles_file, 'w') as f:
+            for name in self.profiles.keys():
+                f.write(name + '\n')
+
+    def select_profile(self, profile_name):
+        self.current_profile_name = profile_name
+        self.active_profile_path = os.path.join(self.data_dir, profile_name)
+        os.makedirs(self.active_profile_path, exist_ok=True)
+        print(f"Perfil '{self.current_profile_name}' selecionado. Dados em: {self.active_profile_path}")
+        self.setWindowTitle(f"Navegador PyTech 3 (CEFPython) - Perfil: {self.current_profile_name}")
+
+        # Recria as abas com o novo perfil
+        self.tab_widget.clear()
+        self.add_new_tab(label=f"Página Inicial ({profile_name})", profile_path=self.active_profile_path)
+
+        # Atualiza o estado da lista de perfis no diálogo (se estiver aberto)
+        if 'profile_list_dialog' in globals() and profile_list_dialog.isVisible():
+            for i in range(profile_list_dialog.profile_list_widget.count()):
+                item = profile_list_dialog.profile_list_widget.item(i)
+                if item.text() == profile_name:
+                    item.setCheckState(Qt.CheckState.Checked)
+                else:
+                    item.setCheckState(Qt.CheckState.Unchecked)
 
 
-    def update_progress_bar(self, progress):
-        if progress < 100 and progress > 0:
-            self.progress_bar.setValue(progress)
-            self.progress_bar.setVisible(True)
-        elif progress == 100:
-            self.progress_bar.setVisible(False)
-        else: # progress == 0 (quando o carregamento começa)
-            self.progress_bar.setValue(0)
-            self.progress_bar.setVisible(True)
+    def open_profile_selector(self):
+        global profile_list_dialog
+        profile_list_dialog = QDialog(self)
+        profile_list_dialog.setWindowTitle("Gerenciar Perfis")
+        layout = QVBoxLayout()
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    QApplication.setApplicationName("Navegador Py-Tech")
+        profile_list_dialog.profile_list_widget = QListWidget()
+        for p_name in self.profiles.keys():
+            item = QListWidgetItem(p_name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            if p_name == self.current_profile_name:
+                item.setCheckState(Qt.CheckState.Checked)
+            else:
+                item.setCheckState(Qt.CheckState.Unchecked)
+            profile_list_dialog.profile_list_widget.addItem(item)
+        
+        profile_list_dialog.profile_list_widget.itemClicked.connect(lambda item: self.select_profile(item.text()))
 
-    # Mostrar o seletor de perfil primeiro
-    profile_dialog = ProfileSelectorDialog()
-    if profile_dialog.exec() == QDialog.DialogCode.Accepted:
-        selected_profile = profile_dialog.selected_profile_name
-        navegador = MiniNavegador(selected_profile)
-        navegador.show()
-        sys.exit(app.exec())
-    else:
-        # Se o usuário cancelar o diálogo de seleção de perfil, sair da aplicação
-        sys.exit(0)
+        layout.addWidget(profile_list_dialog.profile_list_widget)
+
+        add_button = QPushButton("Adicionar Perfil")
+        add_button.clicked.connect(lambda: self.add_profile(profile_list_dialog.profile_list_widget))
+        
+        delete_button = QPushButton("Excluir Perfil Selecionado")
+        delete_button.clicked.connect(lambda: self.delete_profile(profile_list_dialog.profile_list_widget))
+
+        close_button = QPushButton("Fechar")
+        close_button.clicked.connect(profile_list_dialog.accept)
+
+        dialog_buttons_layout = QHBoxLayout()
+        dialog_buttons_layout.addWidget(add_button)
+        dialog_buttons_layout.addWidget(delete_button)
+        layout.addLayout(dialog_buttons_layout)
+        layout.addWidget(close_button)
+
+        profile_list_dialog.setLayout(layout)
+        profile_list_dialog.exec()
+
+    def add_profile(self, profile_list_widget):
+        new_profile_name, ok = QInputDialog.getText(self, "Novo Perfil", "Nome do novo perfil:")
+        if ok and new_profile_name:
+            if new_profile_name in self.profiles:
+                QMessageBox.warning(self, "Nome Inválido", "Um perfil com este nome já existe.")
+            else:
+                self.profiles[new_profile_name] = True
+                self.save_profiles()
+                item = QListWidgetItem(new_profile_name)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                profile_list_widget.addItem(item)
+                self.select_profile(new_profile_name)
+
+    def delete_profile(self, profile_list_widget):
+        selected_items = profile_list_widget.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Nenhum Perfil Selecionado", "Por favor, selecione um perfil para excluir.")
+            return
+
+        reply = QMessageBox.question(self, 'Confirmar Exclusão', 
+                                     "Tem certeza que deseja excluir o perfil selecionado?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            for item in selected_items:
+                profile_name = item.text()
+                if profile_name == self.current_profile_name:
+                    QMessageBox.critical(self, "Erro", "Não é possível excluir o perfil atualmente em uso.")
+                    return
+
+                del self.profiles[profile_name]
+                self.save_profiles()
+                
+                profile_path = os.path.join(self.data_dir, profile_name)
+                if os.path.exists(profile_path):
+                    try:
+                        shutil.rmtree(profile_path)
+                        print(f"Diretório do perfil '{pr
