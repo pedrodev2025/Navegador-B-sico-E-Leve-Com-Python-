@@ -1,352 +1,351 @@
 import sys
 import os
-import json
 import shutil
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QTabWidget, QVBoxLayout, QWidget,
-    QLineEdit, QPushButton, QAction, QMenu, QDialog, QLabel,
-    QCheckBox, QMessageBox, QInputDialog
+    QApplication, QMainWindow, QLineEdit, QToolBar, QWidget,
+    QVBoxLayout, QMessageBox, QInputDialog, QDialog, QPushButton, QListWidget,
+    QHBoxLayout, QAction, QLabel
 )
-from PyQt5.QtCore import QUrl, Qt
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtCore import QUrl, Qt, QDir, QStandardPaths
 from PyQt5.QtGui import QIcon
 
-# Certifique-se de que cefpython está disponível (instale com pip install cefpython3)
-try:
-    from cefpython3 import cefpython as cef
-except ImportError:
-    print("Erro: A biblioteca 'cefpython3' não foi encontrada.")
-    print("Por favor, instale-a usando: pip install cefpython3")
-    sys.exit(1)
+# --- Definições de Caminho ---
+APP_DATA_DIR_NAME = "navegadorpytech"
+PROFILES_DIR_NAME = "profiles"
+DEFAULT_HOME_URL = "https://www.google.com"
+DEFAULT_SEARCH_ENGINE_URL = "https://www.google.com/search?q="
 
-# --- Configurações do Navegador ---
-APP_NAME = "NavegadorPyTech"
-APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", APP_NAME.lower())
-PROFILES_DIR = os.path.join(APP_DATA_DIR, "profiles")
-CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.json")
-DEFAULT_HOMEPAGE = "https://www.google.com"
+def get_app_base_data_dir():
+    """
+    Retorna o diretório base para os dados da aplicação.
+    Ex: ~/.local/share/navegadorpytech/
+    """
+    return os.path.join(
+        QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation),
+        APP_DATA_DIR_NAME
+    )
 
-# Garante que os diretórios necessários existem
-os.makedirs(PROFILES_DIR, exist_ok=True)
+def get_profiles_data_dir():
+    """
+    Retorna o diretório onde os perfis persistentes são armazenados.
+    Ex: ~/.local/share/navegadorpytech/profiles/
+    """
+    profiles_path = os.path.join(get_app_base_data_dir(), PROFILES_DIR_NAME)
+    os.makedirs(profiles_path, exist_ok=True)
+    return profiles_path
 
+def get_profile_data_path(profile_name):
+    """
+    Retorna o caminho completo para o diretório de dados de um perfil persistente.
+    Cria o diretório se ele não existir.
+    """
+    profile_data_path = os.path.join(get_profiles_data_dir(), profile_name)
+    os.makedirs(profile_data_path, exist_ok=True)
+    return profile_data_path
 
-class BrowserWidget(QWidget):
-    """Widget que encapsula o navegador CEF."""
-    def __init__(self, parent=None, profile_path=None):
-        super().__init__(parent)
-        self.browser = None
-        self.profile_path = profile_path
-        self.init_ui()
+def get_guest_profile_data_path():
+    """
+    Retorna um caminho temporário para o modo convidado.
+    """
+    temp_dir = os.path.join(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.TempLocation),
+                            f"{APP_DATA_DIR_NAME}_guest_temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    return temp_dir
 
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+def clean_guest_profile_data(path):
+    """
+    Remove o diretório de dados do perfil convidado.
+    """
+    if os.path.exists(path):
+        try:
+            shutil.rmtree(path)
+            print(f"Dados do modo convidado apagados de: {path}")
+        except OSError as e:
+            print(f"Erro ao apagar dados do modo convidado em {path}: {e}")
 
-        window_info = cef.WindowInfo()
-        rect = [0, 0, self.width(), self.height()]
-        window_info.SetAsChild(self.winId(), rect)
-
-        settings = {
-            "window_info": window_info,
-            "url": DEFAULT_HOMEPAGE,
-        }
-
-        # Configura o diretório de dados do usuário para o perfil
-        if self.profile_path:
-            settings["user_data_path"] = self.profile_path
-            print(f"DEBUG: Carregando perfil de dados do usuário: {self.profile_path}")
-        else:
-            # Modo convidado não salva dados, usa um diretório temporário ou omite para usar o padrão CEF
-            # Para garantir que não salva nada, podemos usar um diretório temporário ou deixar o CEF gerenciar
-            # mas o CEF pode criar um diretório padrão. Melhor não passar user_data_path para modo convidado.
-            print("DEBUG: Modo convidado ativado, não salvando dados.")
-
-        self.browser = cef.CreateBrowserSync(**settings)
-        layout.addWidget(self) # Adiciona o próprio widget ao layout para que o CEF possa renderizar nele
-
-    def resizeEvent(self, event):
-        if self.browser:
-            self.browser.SetBounds(0, 0, self.width(), self.height())
-        super().resizeEvent(event)
-
-    def closeEvent(self, event):
-        if self.browser:
-            self.browser.CloseBrowser(True)
-            self.browser = None # Libera a referência para o navegador
-        super().closeEvent(event)
-
-class ProfileManager:
-    """Gerencia a criação, seleção e remoção de perfis."""
-    def __init__(self):
-        self.config = self._load_config()
-
-    def _load_config(self):
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r') as f:
-                return json.load(f)
-        return {"default_profile": None, "profiles": []}
-
-    def _save_config(self):
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(self.config, f, indent=4)
-
-    def get_profiles(self):
-        return self.config["profiles"]
-
-    def get_default_profile(self):
-        return self.config["default_profile"]
-
-    def set_default_profile(self, profile_name):
-        self.config["default_profile"] = profile_name
-        self._save_config()
-
-    def add_profile(self, profile_name, is_default=False):
-        if profile_name not in self.config["profiles"]:
-            self.config["profiles"].append(profile_name)
-            # Cria o diretório para o novo perfil
-            profile_path = os.path.join(PROFILES_DIR, profile_name)
-            os.makedirs(profile_path, exist_ok=True)
-            print(f"Perfil '{profile_name}' criado em: {profile_path}")
-
-            if is_default:
-                self.set_default_profile(profile_name)
-            self._save_config()
-            return True
-        return False # Perfil já existe
-
-    def remove_profile(self, profile_name):
-        if profile_name in self.config["profiles"]:
-            self.config["profiles"].remove(profile_name)
-            if self.config["default_profile"] == profile_name:
-                self.config["default_profile"] = None
-            
-            # Remove o diretório do perfil
-            profile_path = os.path.join(PROFILES_DIR, profile_name)
-            if os.path.exists(profile_path):
-                shutil.rmtree(profile_path)
-                print(f"Diretório do perfil '{profile_name}' removido: {profile_path}")
-
-            self._save_config()
-            return True
-        return False
-
-class CreateProfileDialog(QDialog):
-    """Diálogo para criar um novo perfil."""
+class ProfileSelectionDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Criar Novo Perfil")
-        self.setGeometry(200, 200, 300, 150)
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QVBoxLayout()
-
-        self.name_label = QLabel("Nome do Perfil:")
-        layout.addWidget(self.name_label)
-
-        self.name_input = QLineEdit(self)
-        layout.addWidget(self.name_input)
-
-        self.default_checkbox = QCheckBox("Definir como padrão ao iniciar", self)
-        layout.addWidget(self.default_checkbox)
-
-        self.create_button = QPushButton("Criar Perfil", self)
-        self.create_button.clicked.connect(self.accept)
-        layout.addWidget(self.create_button)
-
-        self.setLayout(layout)
-
-    def get_profile_data(self):
-        return self.name_input.text(), self.default_checkbox.isChecked()
-
-
-class MainWindow(QMainWindow):
-    """Janela principal do Navegador PyTech."""
-    def __init__(self):
-        super().__init__()
-        self.profile_manager = ProfileManager()
-        self.setWindowTitle(APP_NAME)
-        self.setGeometry(100, 100, 1024, 768)
-        self.setWindowIcon(QIcon.fromTheme("web-browser")) # Tenta usar um ícone de navegador do sistema
-
-        self.central_widget = QTabWidget()
-        self.setCentralWidget(self.central_widget)
-        self.central_widget.setTabsClosable(True)
-        self.central_widget.tabCloseRequested.connect(self.close_tab)
-
-        self.init_menu()
-        self.show_startup_dialog()
-
-    def init_menu(self):
-        # Menu Arquivo
-        file_menu = self.menuBar().addMenu("&Arquivo")
+        self.setWindowTitle("Selecionar Perfil")
+        self.setGeometry(200, 200, 400, 350)
         
-        new_tab_action = QAction("Nova Aba", self)
-        new_tab_action.setShortcut("Ctrl+T")
-        new_tab_action.triggered.connect(self.add_new_tab)
-        file_menu.addAction(new_tab_action)
+        self.selected_profile = None
 
-        exit_action = QAction("&Sair", self)
-        exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        layout = QVBoxLayout(self)
 
-        # Menu Perfis
-        profiles_menu = self.menuBar().addMenu("&Perfis")
+        self.profile_list_widget = QListWidget()
+        layout.addWidget(self.profile_list_widget)
 
-        create_profile_action = QAction("Criar Novo Perfil...", self)
-        create_profile_action.triggered.connect(self.show_create_profile_dialog)
-        profiles_menu.addAction(create_profile_action)
+        button_layout = QHBoxLayout()
 
-        manage_profiles_action = QAction("Gerenciar Perfis...", self)
-        manage_profiles_action.triggered.connect(self.show_manage_profiles_dialog)
-        profiles_menu.addAction(manage_profiles_action)
+        self.guest_button = QPushButton("Iniciar no Modo Convidado")
+        self.guest_button.clicked.connect(self.select_guest_mode)
+        button_layout.addWidget(self.guest_button)
 
-        profiles_menu.addSeparator()
-        self.profile_actions_menu = QMenu("Selecionar Perfil", self)
-        profiles_menu.addMenu(self.profile_actions_menu)
-        self.update_profile_menu() # Popula o menu de seleção de perfis
+        self.create_button = QPushButton("Criar Novo Perfil")
+        self.create_button.clicked.connect(self.create_new_profile)
+        button_layout.addWidget(self.create_button)
 
-    def update_profile_menu(self):
-        self.profile_actions_menu.clear()
-        profiles = self.profile_manager.get_profiles()
-        if not profiles:
-            no_profiles_action = QAction("Nenhum perfil encontrado", self)
-            no_profiles_action.setEnabled(False)
-            self.profile_actions_menu.addAction(no_profiles_action)
-            return
+        layout.addLayout(button_layout)
 
-        for profile_name in profiles:
-            action = QAction(profile_name, self)
-            action.triggered.connect(lambda checked, name=profile_name: self.switch_to_profile(name))
-            self.profile_actions_menu.addAction(action)
+        action_button_layout = QHBoxLayout()
 
-    def switch_to_profile(self, profile_name):
-        reply = QMessageBox.question(
-            self, 'Trocar Perfil',
-            f"Você quer fechar todas as abas e iniciar uma nova sessão com o perfil '{profile_name}'?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.clear_all_tabs()
-            profile_path = os.path.join(PROFILES_DIR, profile_name)
-            self.add_new_tab(profile_path=profile_path, tab_title=profile_name)
+        self.ok_button = QPushButton("Carregar Perfil Selecionado")
+        self.ok_button.clicked.connect(self.accept_selection)
+        self.ok_button.setEnabled(False)
+        action_button_layout.addWidget(self.ok_button)
 
-    def show_startup_dialog(self):
-        """Mostra o pop-up de seleção de perfil ao iniciar."""
-        msg_box = QMessageBox()
-        msg_box.setWindowTitle("Bem-vindo ao Navegador PyTech")
-        msg_box.setText("Selecione um perfil para iniciar:")
+        self.delete_button = QPushButton("Deletar Perfil Selecionado")
+        self.delete_button.clicked.connect(self.delete_selected_profile)
+        self.delete_button.setEnabled(False)
+        action_button_layout.addWidget(self.delete_button)
 
-        guest_button = msg_box.addButton("Modo Convidado", QMessageBox.ActionRole)
+        layout.addLayout(action_button_layout)
+
+        self.load_profiles()
+        self.profile_list_widget.itemDoubleClicked.connect(self.accept_selection)
+        self.profile_list_widget.itemClicked.connect(self.enable_buttons)
+
+        self.enable_buttons()
+
+    def load_profiles(self):
+        self.profile_list_widget.clear()
+        profiles_dir = get_profiles_data_dir()
+        existing_profiles = [d for d in os.listdir(profiles_dir) if os.path.isdir(os.path.join(profiles_dir, d))]
         
-        profiles = self.profile_manager.get_profiles()
-        profile_buttons = []
-        for profile_name in profiles:
-            button = msg_box.addButton(profile_name, QMessageBox.ActionRole)
-            profile_buttons.append((profile_name, button))
-
-        # Adiciona a opção de perfil padrão, se houver
-        default_profile = self.profile_manager.get_default_profile()
-        if default_profile and default_profile in profiles:
-            msg_box.setDefaultButton(next(btn for name, btn in profile_buttons if name == default_profile))
-            
-        msg_box.exec_()
-
-        clicked_button = msg_box.clickedButton()
-
-        if clicked_button == guest_button:
-            self.add_new_tab(profile_path=None, tab_title="Convidado")
+        if not existing_profiles:
+            QMessageBox.information(self, "Nenhum Perfil Encontrado", 
+                                    "Nenhum perfil persistente encontrado. Você pode criar um novo ou iniciar no modo convidado.")
+            self.profile_list_widget.setEnabled(False)
+            self.ok_button.setEnabled(False)
+            self.delete_button.setEnabled(False)
         else:
-            for profile_name, button in profile_buttons:
-                if clicked_button == button:
-                    profile_path = os.path.join(PROFILES_DIR, profile_name)
-                    self.add_new_tab(profile_path=profile_path, tab_title=profile_name)
-                    break
-            else: # Se nenhuma opção foi selecionada ou se a janela foi fechada sem escolher
-                 # Ou se não houver perfis e o modo convidado não for clicado
-                self.add_new_tab(profile_path=None, tab_title="Convidado")
+            self.profile_list_widget.setEnabled(True)
+            for profile in existing_profiles:
+                self.profile_list_widget.addItem(profile)
+            if existing_profiles:
+                self.profile_list_widget.setCurrentRow(0)
+                self.enable_buttons()
 
+    def enable_buttons(self):
+        is_selected = bool(self.profile_list_widget.currentItem())
+        self.ok_button.setEnabled(is_selected)
+        self.delete_button.setEnabled(is_selected)
 
-    def add_new_tab(self, url=DEFAULT_HOMEPAGE, profile_path=None, tab_title="Nova Aba"):
-        browser_widget = BrowserWidget(self, profile_path=profile_path)
-        index = self.central_widget.addTab(browser_widget, tab_title)
-        self.central_widget.setCurrentIndex(index)
-        browser_widget.browser.LoadUrl(url)
+    def select_guest_mode(self):
+        self.selected_profile = "guest_mode"
+        self.accept()
 
-    def close_tab(self, index):
-        widget = self.central_widget.widget(index)
-        if widget:
-            widget.closeEvent(None) # Chama o closeEvent do BrowserWidget para liberar o CEF
-            self.central_widget.removeTab(index)
-
-    def clear_all_tabs(self):
-        while self.central_widget.count() > 0:
-            self.close_tab(0)
-
-    def show_create_profile_dialog(self):
-        dialog = CreateProfileDialog(self)
-        if dialog.exec_():
-            profile_name, is_default = dialog.get_profile_data()
-            if not profile_name:
-                QMessageBox.warning(self, "Erro", "O nome do perfil não pode ser vazio.")
+    def create_new_profile(self):
+        new_profile_name, ok = QInputDialog.getText(
+            self, "Novo Perfil", "Digite o nome para o novo perfil:"
+        )
+        if ok and new_profile_name:
+            new_profile_name = new_profile_name.strip()
+            if not new_profile_name:
+                QMessageBox.warning(self, "Nome Inválido", "O nome do perfil não pode ser vazio.")
+                return
+            
+            if new_profile_name.lower() == "guest" or new_profile_name.lower() == "guest_mode":
+                QMessageBox.warning(self, "Nome Reservado", "O nome 'guest' é reservado para o modo convidado. Por favor, escolha outro nome.")
                 return
 
-            if self.profile_manager.add_profile(profile_name, is_default):
-                QMessageBox.information(self, "Sucesso", f"Perfil '{profile_name}' criado com sucesso!")
-                self.update_profile_menu()
+            profile_path = get_profile_data_path(new_profile_name)
+            if os.path.exists(profile_path) and os.path.isdir(profile_path):
+                QMessageBox.information(self, "Perfil Existente", f"O perfil '{new_profile_name}' já existe e será carregado.")
             else:
-                QMessageBox.warning(self, "Erro", f"O perfil '{profile_name}' já existe.")
+                QMessageBox.information(self, "Perfil Criado", f"O perfil '{new_profile_name}' foi criado com sucesso!")
 
-    def show_manage_profiles_dialog(self):
-        profiles = self.profile_manager.get_profiles()
-        if not profiles:
-            QMessageBox.information(self, "Gerenciar Perfis", "Nenhum perfil para gerenciar.")
+            self.selected_profile = new_profile_name
+            self.accept()
+
+    def accept_selection(self):
+        selected_item = self.profile_list_widget.currentItem()
+        if selected_item:
+            self.selected_profile = selected_item.text()
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Nenhuma Seleção", "Por favor, selecione um perfil ou inicie no modo convidado.")
+
+    def delete_selected_profile(self):
+        selected_item = self.profile_list_widget.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "Nenhuma Seleção", "Por favor, selecione um perfil para deletar.")
             return
 
-        items = profiles
-        item, ok = QInputDialog.getItem(
-            self, "Gerenciar Perfis", "Selecione um perfil para remover:",
-            items, 0, False
-        )
-        if ok and item:
-            reply = QMessageBox.question(
-                self, 'Remover Perfil',
-                f"Você tem certeza que deseja remover o perfil '{item}'? Todos os dados serão perdidos.",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-            )
-            if reply == QMessageBox.Yes:
-                if self.profile_manager.remove_profile(item):
-                    QMessageBox.information(self, "Sucesso", f"Perfil '{item}' removido com sucesso!")
-                    self.update_profile_menu()
-                    # Se o perfil removido era o atual, voltar para modo convidado
-                    if self.central_widget.count() > 0:
-                        current_browser_widget = self.central_widget.currentWidget()
-                        # Verifica se o caminho do perfil atual termina com o nome do perfil removido
-                        if current_browser_widget and current_browser_widget.profile_path and current_browser_widget.profile_path.endswith(os.sep + item):
-                            self.clear_all_tabs()
-                            self.add_new_tab(profile_path=None, tab_title="Convidado")
-                else:
-                    QMessageBox.warning(self, "Erro", f"Não foi possível remover o perfil '{item}'.")
+        profile_to_delete = selected_item.text()
+        reply = QMessageBox.question(self, 'Confirmar Exclusão', 
+                                    f"Tem certeza que deseja deletar o perfil '{profile_to_delete}' e todos os seus dados?",
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
 
-def main():
-    # Inicializa CEF Python
-    sys.excepthook = cef.ExceptHook  # Para lidar com exceções não capturadas
-    cef.Initialize()
+        if reply == QMessageBox.Yes:
+            profile_path = get_profile_data_path(profile_to_delete)
+            if os.path.exists(profile_path):
+                try:
+                    shutil.rmtree(profile_path)
+                    QMessageBox.information(self, "Perfil Deletado", f"O perfil '{profile_to_delete}' foi deletado com sucesso.")
+                    self.load_profiles()
+                except OSError as e:
+                    QMessageBox.critical(self, "Erro ao Deletar", f"Erro ao deletar o perfil '{profile_to_delete}':\n{e}")
+            else:
+                QMessageBox.warning(self, "Erro", "Diretório do perfil não encontrado.")
 
-    app = QApplication(sys.argv)
-    
-    # Adiciona um estilo visual (opcional)
-    # app.setStyle("Fusion") 
 
-    main_window = MainWindow()
-    main_window.show()
+class Browser(QMainWindow):
+    def __init__(self, profile_name="guest_mode"):
+        super().__init__()
+        self.profile_name = profile_name
+        self.is_guest_mode = (self.profile_name == "guest_mode")
+        self.guest_temp_path = None
 
-    # Loop de eventos do CEF
-    cef.MessageLoop()
+        title_suffix = "Modo Convidado" if self.is_guest_mode else f"Perfil: {self.profile_name}"
+        self.setWindowTitle(f"Mini Navegador PyQt - {title_suffix}")
+        self.setGeometry(100, 100, 1024, 768)
 
-    # Finaliza CEF Python
-    cef.Shutdown()
-    sys.exit(app.exec_())
+        container = QWidget()
+        self.setCentralWidget(container)
+        layout = QVBoxLayout(container)
+
+        self.browser = QWebEngineView(self)
+        self.web_profile = self.browser.page().profile()
+
+        if self.is_guest_mode:
+            self.guest_temp_path = get_guest_profile_data_path()
+            print(f"Iniciando em modo convidado. Dados temporários em: {self.guest_temp_path}")
+            self.web_profile.setPersistentCookiesPolicy(self.web_profile.NoPersistentCookies) 
+            self.web_profile.setCachePath(self.guest_temp_path)
+            self.web_profile.setPersistentStoragePath(self.guest_temp_path)
+        else:
+            profile_data_path = get_profile_data_path(self.profile_name)
+            self.web_profile.setPersistentCookiesPolicy(self.web_profile.AllowPersistentCookies)
+            self.web_profile.setCachePath(profile_data_path)
+            self.web_profile.setPersistentStoragePath(profile_data_path)
+
+        toolbar = QToolBar("Navegação")
+        self.addToolBar(toolbar)
+
+        back_button = toolbar.addAction("Voltar")
+        back_button.triggered.connect(self.browser.back)
+
+        forward_button = toolbar.addAction("Avançar")
+        forward_button.triggered.connect(self.browser.forward)
+
+        reload_button = toolbar.addAction("Recarregar")
+        reload_button.triggered.connect(self.browser.reload)
+        
+        home_button = toolbar.addAction("Home")
+        home_button.triggered.connect(self.navigate_home)
+
+        manage_profiles_button = toolbar.addAction("Gerenciar Perfis")
+        manage_profiles_button.triggered.connect(self.show_profile_management_dialog)
+
+        self.url_bar_layout = QHBoxLayout()
+        
+        self.secure_icon = QLabel()
+        self.secure_icon.setFixedSize(20, 20)
+        # Tenta carregar ícones do tema, com fallback para ícones padrão (se existirem)
+        # Note: Para QIcon(":/icons/locked.png") funcionar, você precisaria de um arquivo .qrc
+        # Por enquanto, confiamos mais no fromTheme ou na ausência de ícone se o tema falhar.
+        self.secure_icon.setPixmap(QIcon.fromTheme("object-locked", QIcon.fromTheme("dialog-ok")).pixmap(20, 20))
+
+
+        self.url_bar_layout.addWidget(self.secure_icon)
+        
+        self.url_bar = QLineEdit()
+        self.url_bar.returnPressed.connect(self.navigate_to_url)
+        self.url_bar_layout.addWidget(self.url_bar)
+
+        toolbar.addWidget(self._create_widget_from_layout(self.url_bar_layout))
+
+        self.browser.urlChanged.connect(self.update_url_bar)
+        self.browser.page().fullScreenRequested.connect(lambda request: request.accept())
+        
+        # REMOVIDA A LINHA self.browser.page().certificateError.connect(self.handle_certificate_error)
+        # pois está causando o AttributeError
+        
+        layout.addWidget(self.browser)
+
+        self.browser.setUrl(QUrl(DEFAULT_HOME_URL))
+
+    def _create_widget_from_layout(self, layout):
+        widget = QWidget()
+        widget.setLayout(layout)
+        return widget
+
+    def navigate_to_url(self):
+        text = self.url_bar.text().strip()
+
+        if not text:
+            return
+
+        if (text.startswith("http://") or
+            text.startswith("https://") or
+            text.startswith("ftp://") or
+            ('.' in text and ' ' not in text)):
+            
+            if not (text.startswith("http://") or text.startswith("https://") or text.startswith("ftp://")):
+                url = "http://" + text
+            else:
+                url = text
+            self.browser.setUrl(QUrl(url))
+        else:
+            search_query = QUrl.toPercentEncoding(text).data().decode('utf-8')
+            search_url = DEFAULT_SEARCH_ENGINE_URL + search_query
+            self.browser.setUrl(QUrl(search_url))
+
+    def update_url_bar(self, qurl):
+        self.url_bar.setText(qurl.toString())
+        
+        if qurl.scheme() == "https":
+            self.secure_icon.setPixmap(QIcon.fromTheme("object-locked", QIcon.fromTheme("dialog-ok")).pixmap(20, 20))
+            self.secure_icon.setToolTip("Conexão segura (HTTPS)")
+        else:
+            self.secure_icon.setPixmap(QIcon.fromTheme("dialog-warning", QIcon.fromTheme("dialog-error")).pixmap(20, 20))
+            self.secure_icon.setToolTip("Conexão não segura ou HTTP")
+
+    def navigate_home(self):
+        self.browser.setUrl(QUrl(DEFAULT_HOME_URL))
+
+    def show_profile_management_dialog(self):
+        dialog = ProfileSelectionDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            new_profile = dialog.selected_profile
+            if new_profile:
+                QMessageBox.information(self, "Reiniciar", 
+                                        f"O navegador será reiniciado com o perfil '{new_profile}'.")
+                QApplication.quit()
+
+    # O método handle_certificate_error foi removido, pois o sinal não pôde ser conectado.
+    # Se você precisar muito dessa funcionalidade, precisaremos investigar a API exata para a sua versão do PyQtWebEngine.
+
+    def closeEvent(self, event):
+        if self.is_guest_mode and self.guest_temp_path:
+            clean_guest_profile_data(self.guest_temp_path)
+        super().closeEvent(event)
 
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+
+    profiles_dir_exists = os.path.exists(get_profiles_data_dir()) and len(os.listdir(get_profiles_data_dir())) > 0
+
+    profile_to_load = "guest_mode"
+
+    if profiles_dir_exists:
+        dialog = ProfileSelectionDialog()
+        if dialog.exec_() == QDialog.Accepted:
+            profile_to_load = dialog.selected_profile
+        else:
+            QMessageBox.information(None, "Nenhum Perfil Selecionado", 
+                                    "Nenhum perfil persistente foi selecionado. Iniciando no modo convidado.")
+            profile_to_load = "guest_mode"
+    else:
+        QMessageBox.information(None, "Iniciando em Modo Convidado", 
+                                "Nenhum perfil persistente encontrado. Iniciando no modo convidado.\n"
+                                "Você pode criar um novo perfil usando a opção 'Gerenciar Perfis'.")
+        profile_to_load = "guest_mode"
+
+    browser_window = Browser(profile_to_load)
+    browser_window.show()
+
+    sys.exit(app.exec_())
