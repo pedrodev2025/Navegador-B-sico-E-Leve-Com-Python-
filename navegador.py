@@ -1,68 +1,116 @@
 import sys
 import os
 import shutil
+import gc
+import glob
+import re
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLineEdit, QToolBar, QWidget,
     QVBoxLayout, QMessageBox, QInputDialog, QDialog, QPushButton, QListWidget,
-    QHBoxLayout, QAction, QLabel
+    QHBoxLayout, QLabel, QAction
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView
-from PyQt5.QtCore import QUrl, Qt, QDir, QStandardPaths
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile
+from PyQt5.QtCore import QUrl, Qt, QDir, QStandardPaths, QTimer, QThread
 from PyQt5.QtGui import QIcon
 
-# --- Definições de Caminho ---
+# --- Definições de Caminho e Configurações ---
 APP_DATA_DIR_NAME = "navegadorpytech"
 PROFILES_DIR_NAME = "profiles"
 DEFAULT_HOME_URL = "https://www.google.com"
 DEFAULT_SEARCH_ENGINE_URL = "https://www.google.com/search?q="
 
 def get_app_base_data_dir():
-    """
-    Retorna o diretório base para os dados da aplicação.
-    Ex: ~/.local/share/navegadorpytech/
-    """
-    return os.path.join(
-        QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation),
-        APP_DATA_DIR_NAME
-    )
+    # --- MUDANÇA AQUI: Construindo um caminho mais explícito ---
+    # `os.path.expanduser('~')` retorna o diretório base do usuário (ex: C:\Users\Pedro)
+    # Em seguida, adicionamos o caminho padrão para AppData\Local e o nome do seu aplicativo.
+    user_home = os.path.expanduser('~')
+    app_data_path = os.path.join(user_home, 'AppData', 'Local', APP_DATA_DIR_NAME)
+    os.makedirs(app_data_path, exist_ok=True)
+    return app_data_path
+    # -----------------------------------------------------------
 
 def get_profiles_data_dir():
-    """
-    Retorna o diretório onde os perfis persistentes são armazenados.
-    Ex: ~/.local/share/navegadorpytech/profiles/
-    """
     profiles_path = os.path.join(get_app_base_data_dir(), PROFILES_DIR_NAME)
     os.makedirs(profiles_path, exist_ok=True)
     return profiles_path
 
 def get_profile_data_path(profile_name):
-    """
-    Retorna o caminho completo para o diretório de dados de um perfil persistente.
-    Cria o diretório se ele não existir.
-    """
     profile_data_path = os.path.join(get_profiles_data_dir(), profile_name)
     os.makedirs(profile_data_path, exist_ok=True)
     return profile_data_path
 
-def get_guest_profile_data_path():
-    """
-    Retorna um caminho temporário para o modo convidado.
-    """
-    temp_dir = os.path.join(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.TempLocation),
-                            f"{APP_DATA_DIR_NAME}_guest_temp")
-    os.makedirs(temp_dir, exist_ok=True)
-    return temp_dir
+def get_guest_profile_base_temp_dir():
+    temp_base_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.TempLocation)
+    guest_temp_path = os.path.join(temp_base_dir, f"{APP_DATA_DIR_NAME}_guest_{os.getpid()}")
+    os.makedirs(guest_temp_path, exist_ok=True)
+    return guest_temp_path
 
-def clean_guest_profile_data(path):
+# --- CLASSE PARA EXCLUSÃO EM SEGUNDO PLANO (Ainda Mais Robusta) ---
+class CleanerThread(QThread):
+    def __init__(self, path_to_clean):
+        super().__init__()
+        self.path_to_clean = path_to_clean
+        self.max_retries = 30 # Aumentado para 30 tentativas
+        self.retry_delay = 1000 # 1 segundo por tentativa
+
+    def run(self):
+        print(f"Iniciando limpeza em segundo plano para: {self.path_to_clean}")
+        for i in range(self.max_retries):
+            if not os.path.exists(self.path_to_clean):
+                print(f"Diretório temporário {self.path_to_clean} já não existe. Limpeza concluída (ou já foi feita).")
+                return
+
+            try:
+                shutil.rmtree(self.path_to_clean)
+                print(f"Dados do modo convidado apagados de: {self.path_to_clean}")
+                return
+            except OSError as e:
+                print(f"Tentativa {i+1}/{self.max_retries}: Erro ao apagar dados do modo convidado em {self.path_to_clean}: {e}")
+                if i < self.max_retries - 1:
+                    self.msleep(self.retry_delay)
+                else:
+                    print(f"Falha CRÍTICA e PERSISTENTE: Não foi possível apagar dados do modo convidado em {self.path_to_clean} após {self.max_retries} tentativas. Por favor, remova manualmente se desejar.")
+
+def clean_guest_profile_data_async(path):
+    if os.path.exists(path) and os.path.isdir(path):
+        cleaner = CleanerThread(path)
+        cleaner.start()
+        return cleaner
+    else:
+        print(f"Caminho para limpeza não é um diretório ou não existe: {path}")
+        return None
+
+def clean_all_old_guest_data_on_startup():
     """
-    Remove o diretório de dados do perfil convidado.
+    Limpa todos os diretórios de dados de convidado de sessões anteriores
+    que não foram removidos.
     """
-    if os.path.exists(path):
-        try:
-            shutil.rmtree(path)
-            print(f"Dados do modo convidado apagados de: {path}")
-        except OSError as e:
-            print(f"Erro ao apagar dados do modo convidado em {path}: {e}")
+    temp_base_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.TempLocation)
+    guest_dir_pattern = os.path.join(temp_base_dir, f"{APP_DATA_DIR_NAME}_guest_*")
+    
+    print("\nVerificando e limpando dados de convidados anteriores na inicialização...")
+    
+    found_old_dirs = False
+    for path in glob.glob(guest_dir_pattern):
+        current_session_pid_match = re.search(r'_guest_(\d+)$', path)
+        if current_session_pid_match and int(current_session_pid_match.group(1)) == os.getpid():
+            print(f"  Pulando diretório da sessão atual: {path}")
+            continue
+
+        if os.path.isdir(path):
+            found_old_dirs = True
+            print(f"  Tentando limpar diretório antigo: {path}")
+            try:
+                shutil.rmtree(path)
+                print(f"  Diretório antigo apagado com sucesso: {path}")
+            except OSError as e:
+                print(f"  AVISO: Não foi possível apagar diretório antigo {path}: {e}")
+    
+    if not found_old_dirs:
+        print("  Nenhum dado de convidado antigo encontrado para limpeza.")
+    print("Fim da verificação de limpeza na inicialização.\n")
+
 
 class ProfileSelectionDialog(QDialog):
     def __init__(self, parent=None):
@@ -198,6 +246,7 @@ class Browser(QMainWindow):
         self.profile_name = profile_name
         self.is_guest_mode = (self.profile_name == "guest_mode")
         self.guest_temp_path = None
+        self._cleaner_thread = None
 
         title_suffix = "Modo Convidado" if self.is_guest_mode else f"Perfil: {self.profile_name}"
         self.setWindowTitle(f"Mini Navegador PyQt - {title_suffix}")
@@ -208,17 +257,24 @@ class Browser(QMainWindow):
         layout = QVBoxLayout(container)
 
         self.browser = QWebEngineView(self)
-        self.web_profile = self.browser.page().profile()
+        self.web_profile = self.browser.page().profile() 
 
         if self.is_guest_mode:
-            self.guest_temp_path = get_guest_profile_data_path()
+            self.guest_temp_path = get_guest_profile_base_temp_dir()
             print(f"Iniciando em modo convidado. Dados temporários em: {self.guest_temp_path}")
-            self.web_profile.setPersistentCookiesPolicy(self.web_profile.NoPersistentCookies) 
-            self.web_profile.setCachePath(self.guest_temp_path)
-            self.web_profile.setPersistentStoragePath(self.guest_temp_path)
+
+            guest_cache_path = os.path.join(self.guest_temp_path, "cache")
+            guest_storage_path = os.path.join(self.guest_temp_path, "storage")
+            os.makedirs(guest_cache_path, exist_ok=True)
+            os.makedirs(guest_storage_path, exist_ok=True)
+            
+            self.web_profile.setPersistentCookiesPolicy(QWebEngineProfile.NoPersistentCookies)
+            self.web_profile.setCachePath(guest_cache_path)
+            self.web_profile.setPersistentStoragePath(guest_storage_path)
+            self._guest_web_profile_ref = self.web_profile 
         else:
             profile_data_path = get_profile_data_path(self.profile_name)
-            self.web_profile.setPersistentCookiesPolicy(self.web_profile.AllowPersistentCookies)
+            self.web_profile.setPersistentCookiesPolicy(QWebEngineProfile.AllowPersistentCookies)
             self.web_profile.setCachePath(profile_data_path)
             self.web_profile.setPersistentStoragePath(profile_data_path)
 
@@ -244,9 +300,6 @@ class Browser(QMainWindow):
         
         self.secure_icon = QLabel()
         self.secure_icon.setFixedSize(20, 20)
-        # Tenta carregar ícones do tema, com fallback para ícones padrão (se existirem)
-        # Note: Para QIcon(":/icons/locked.png") funcionar, você precisaria de um arquivo .qrc
-        # Por enquanto, confiamos mais no fromTheme ou na ausência de ícone se o tema falhar.
         self.secure_icon.setPixmap(QIcon.fromTheme("object-locked", QIcon.fromTheme("dialog-ok")).pixmap(20, 20))
 
 
@@ -260,9 +313,6 @@ class Browser(QMainWindow):
 
         self.browser.urlChanged.connect(self.update_url_bar)
         self.browser.page().fullScreenRequested.connect(lambda request: request.accept())
-        
-        # REMOVIDA A LINHA self.browser.page().certificateError.connect(self.handle_certificate_error)
-        # pois está causando o AttributeError
         
         layout.addWidget(self.browser)
 
@@ -316,22 +366,37 @@ class Browser(QMainWindow):
                                         f"O navegador será reiniciado com o perfil '{new_profile}'.")
                 QApplication.quit()
 
-    # O método handle_certificate_error foi removido, pois o sinal não pôde ser conectado.
-    # Se você precisar muito dessa funcionalidade, precisaremos investigar a API exata para a sua versão do PyQtWebEngine.
-
     def closeEvent(self, event):
         if self.is_guest_mode and self.guest_temp_path:
-            clean_guest_profile_data(self.guest_temp_path)
+            print(f"Agendando limpeza do modo convidado para: {self.guest_temp_path}")
+            
+            if self._guest_web_profile_ref:
+                self._guest_web_profile_ref.clearHttpCache()
+                self._guest_web_profile_ref.clearAllVisitedLinks()
+                self._guest_web_profile_ref = None 
+                print("Referências ao QWebEngineProfile do modo convidado liberadas.")
+
+            gc.collect() 
+            QTimer.singleShot(5000, lambda: self._start_cleaner_thread())
+            
         super().closeEvent(event)
 
+    def _start_cleaner_thread(self):
+        """Método auxiliar para iniciar a thread de limpeza."""
+        self._cleaner_thread = clean_guest_profile_data_async(self.guest_temp_path)
+
 if __name__ == "__main__":
+    clean_all_old_guest_data_on_startup()
+
     app = QApplication(sys.argv)
 
-    profiles_dir_exists = os.path.exists(get_profiles_data_dir()) and len(os.listdir(get_profiles_data_dir())) > 0
+    profiles_dir = get_profiles_data_dir()
+    existing_profiles = [d for d in os.listdir(profiles_dir) if os.path.isdir(os.path.join(profiles_dir, d))]
+    profiles_exist = bool(existing_profiles)
 
     profile_to_load = "guest_mode"
 
-    if profiles_dir_exists:
+    if profiles_exist:
         dialog = ProfileSelectionDialog()
         if dialog.exec_() == QDialog.Accepted:
             profile_to_load = dialog.selected_profile
