@@ -8,11 +8,11 @@ import re
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLineEdit, QToolBar, QWidget,
     QVBoxLayout, QMessageBox, QInputDialog, QDialog, QPushButton, QListWidget,
-    QHBoxLayout, QLabel, QAction
+    QHBoxLayout, QLabel, QAction, QTabWidget, QMenu # Importe QTabWidget e QMenu
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineProfile, QWebEnginePage
 from PyQt5.QtCore import QUrl, Qt, QDir, QStandardPaths, QTimer, QThread
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QKeySequence # Importe QKeySequence
 
 # --- Definições de Caminho e Configurações ---
 APP_DATA_DIR_NAME = "navegadorpytech"
@@ -21,14 +21,10 @@ DEFAULT_HOME_URL = "https://www.google.com"
 DEFAULT_SEARCH_ENGINE_URL = "https://www.google.com/search?q="
 
 def get_app_base_data_dir():
-    # --- MUDANÇA AQUI: Construindo um caminho mais explícito ---
-    # `os.path.expanduser('~')` retorna o diretório base do usuário (ex: C:\Users\Pedro)
-    # Em seguida, adicionamos o caminho padrão para AppData\Local e o nome do seu aplicativo.
     user_home = os.path.expanduser('~')
     app_data_path = os.path.join(user_home, 'AppData', 'Local', APP_DATA_DIR_NAME)
     os.makedirs(app_data_path, exist_ok=True)
     return app_data_path
-    # -----------------------------------------------------------
 
 def get_profiles_data_dir():
     profiles_path = os.path.join(get_app_base_data_dir(), PROFILES_DIR_NAME)
@@ -46,13 +42,13 @@ def get_guest_profile_base_temp_dir():
     os.makedirs(guest_temp_path, exist_ok=True)
     return guest_temp_path
 
-# --- CLASSE PARA EXCLUSÃO EM SEGUNDO PLANO (Ainda Mais Robusta) ---
+# --- CLASSE PARA EXCLUSÃO EM SEGUNDO PLANO ---
 class CleanerThread(QThread):
     def __init__(self, path_to_clean):
         super().__init__()
         self.path_to_clean = path_to_clean
-        self.max_retries = 30 # Aumentado para 30 tentativas
-        self.retry_delay = 1000 # 1 segundo por tentativa
+        self.max_retries = 30
+        self.retry_delay = 1000
 
     def run(self):
         print(f"Iniciando limpeza em segundo plano para: {self.path_to_clean}")
@@ -82,10 +78,6 @@ def clean_guest_profile_data_async(path):
         return None
 
 def clean_all_old_guest_data_on_startup():
-    """
-    Limpa todos os diretórios de dados de convidado de sessões anteriores
-    que não foram removidos.
-    """
     temp_base_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.TempLocation)
     guest_dir_pattern = os.path.join(temp_base_dir, f"{APP_DATA_DIR_NAME}_guest_*")
     
@@ -240,25 +232,56 @@ class ProfileSelectionDialog(QDialog):
                 QMessageBox.warning(self, "Erro", "Diretório do perfil não encontrado.")
 
 
+# --- NOVA CLASSE PARA CADA ABA DO NAVEGADOR ---
+class BrowserTabWidget(QWidget):
+    def __init__(self, profile, parent=None, initial_url=None):
+        super().__init__(parent)
+        self.web_profile = profile # Recebe o perfil de QWebEngineProfile
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0,0,0,0) # Remove margens extras
+
+        self.browser = QWebEngineView(self)
+        self.browser.setPage(QWebEnginePage(self.web_profile, self.browser)) # Associa a página ao perfil
+
+        layout.addWidget(self.browser)
+
+        # Conecta sinais para atualizar a janela principal
+        self.browser.urlChanged.connect(self._url_changed)
+        self.browser.titleChanged.connect(self._title_changed)
+        self.browser.loadFinished.connect(self._load_finished)
+
+        # Carrega a URL inicial
+        if initial_url:
+            self.browser.setUrl(QUrl(initial_url))
+        else:
+            self.browser.setUrl(QUrl(DEFAULT_HOME_URL))
+
+    def _url_changed(self, qurl):
+        # Sinaliza para a janela principal que a URL mudou
+        if self.parent() and hasattr(self.parent(), 'tab_url_changed'):
+            self.parent().tab_url_changed(self.browser.url())
+
+    def _title_changed(self, title):
+        # Sinaliza para a janela principal que o título mudou
+        if self.parent() and hasattr(self.parent(), 'tab_title_changed'):
+            self.parent().tab_title_changed(title)
+
+    def _load_finished(self, success):
+        # Sinaliza para a janela principal que o carregamento terminou (útil para icones, etc)
+        if self.parent() and hasattr(self.parent(), 'tab_load_finished'):
+            self.parent().tab_load_finished(success)
+
+
 class Browser(QMainWindow):
-    def __init__(self, profile_name="guest_mode"):
+    def __init__(self, profile_name="guest_mode", initial_url=DEFAULT_HOME_URL):
         super().__init__()
         self.profile_name = profile_name
         self.is_guest_mode = (self.profile_name == "guest_mode")
         self.guest_temp_path = None
         self._cleaner_thread = None
 
-        title_suffix = "Modo Convidado" if self.is_guest_mode else f"Perfil: {self.profile_name}"
-        self.setWindowTitle(f"Mini Navegador PyQt - {title_suffix}")
-        self.setGeometry(100, 100, 1024, 768)
-
-        container = QWidget()
-        self.setCentralWidget(container)
-        layout = QVBoxLayout(container)
-
-        self.browser = QWebEngineView(self)
-        self.web_profile = self.browser.page().profile() 
-
+        # 1. Configura o QWebEngineProfile PRIMEIRO
         if self.is_guest_mode:
             self.guest_temp_path = get_guest_profile_base_temp_dir()
             print(f"Iniciando em modo convidado. Dados temporários em: {self.guest_temp_path}")
@@ -268,30 +291,65 @@ class Browser(QMainWindow):
             os.makedirs(guest_cache_path, exist_ok=True)
             os.makedirs(guest_storage_path, exist_ok=True)
             
+            self.web_profile = QWebEngineProfile("guest_profile", self)
             self.web_profile.setPersistentCookiesPolicy(QWebEngineProfile.NoPersistentCookies)
             self.web_profile.setCachePath(guest_cache_path)
             self.web_profile.setPersistentStoragePath(guest_storage_path)
             self._guest_web_profile_ref = self.web_profile 
         else:
             profile_data_path = get_profile_data_path(self.profile_name)
+            self.web_profile = QWebEngineProfile(self.profile_name, self) 
             self.web_profile.setPersistentCookiesPolicy(QWebEngineProfile.AllowPersistentCookies)
             self.web_profile.setCachePath(profile_data_path)
             self.web_profile.setPersistentStoragePath(profile_data_path)
 
+        title_suffix = "Modo Convidado" if self.is_guest_mode else f"Perfil: {self.profile_name}"
+        self.setWindowTitle(f"Mini Navegador PyQt - {title_suffix}")
+        self.setGeometry(100, 100, 1024, 768)
+
+        # Container principal
+        container = QWidget()
+        self.setCentralWidget(container)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0,0,0,0)
+
+        # 2. Sistema de Abas (QTabWidget) - Criado ANTES da Toolbar
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True) # Aparência mais moderna
+        self.tabs.tabBarDoubleClicked.connect(self.add_new_tab) # Duplo clique na barra de abas cria nova aba
+        self.tabs.currentChanged.connect(self.current_tab_changed) # Atualiza URL bar ao mudar de aba
+        self.tabs.setTabsClosable(True) # Habilita o botão 'x' nas abas
+        self.tabs.tabCloseRequested.connect(self.close_tab_by_index) # Conecta o fechamento da aba
+
+        layout.addWidget(self.tabs) # Adiciona o QTabWidget ao layout
+
+        # 3. Barra de Ferramentas
         toolbar = QToolBar("Navegação")
         self.addToolBar(toolbar)
 
+        # Conecta os botões a MÉTODOS DELEGADOS na classe Browser
+        # Isso garante que self.current_browser_tab() só será chamado QUANDO o botão for clicado
         back_button = toolbar.addAction("Voltar")
-        back_button.triggered.connect(self.browser.back)
+        back_button.triggered.connect(self._go_back_on_current_tab) 
 
         forward_button = toolbar.addAction("Avançar")
-        forward_button.triggered.connect(self.browser.forward)
+        forward_button.triggered.connect(self._go_forward_on_current_tab) 
 
         reload_button = toolbar.addAction("Recarregar")
-        reload_button.triggered.connect(self.browser.reload)
+        reload_button.triggered.connect(self._reload_current_tab) 
         
         home_button = toolbar.addAction("Home")
-        home_button.triggered.connect(self.navigate_home)
+        home_button.triggered.connect(self._go_home_on_current_tab) # Renomeado para consistência
+
+        # Botão para nova aba
+        new_tab_button = toolbar.addAction("Nova Aba")
+        new_tab_button.triggered.connect(self.add_new_tab)
+        new_tab_button.setShortcut(QKeySequence("Ctrl+T")) # Atalho para nova aba
+
+        # Botão para fechar aba
+        close_tab_button = toolbar.addAction("Fechar Aba")
+        close_tab_button.triggered.connect(self.close_current_tab)
+        close_tab_button.setShortcut(QKeySequence("Ctrl+W")) # Atalho para fechar aba
 
         manage_profiles_button = toolbar.addAction("Gerenciar Perfis")
         manage_profiles_button.triggered.connect(self.show_profile_management_dialog)
@@ -302,34 +360,88 @@ class Browser(QMainWindow):
         self.secure_icon.setFixedSize(20, 20)
         self.secure_icon.setPixmap(QIcon.fromTheme("object-locked", QIcon.fromTheme("dialog-ok")).pixmap(20, 20))
 
-
         self.url_bar_layout.addWidget(self.secure_icon)
         
         self.url_bar = QLineEdit()
-        self.url_bar.returnPressed.connect(self.navigate_to_url)
+        self.url_bar.returnPressed.connect(self.navigate_to_url_from_bar) # Conectado a nova função
         self.url_bar_layout.addWidget(self.url_bar)
 
         toolbar.addWidget(self._create_widget_from_layout(self.url_bar_layout))
 
-        self.browser.urlChanged.connect(self.update_url_bar)
-        self.browser.page().fullScreenRequested.connect(lambda request: request.accept())
+        # 4. Adiciona a primeira aba APÓS o QTabWidget ser inicializado
+        self.add_new_tab(QUrl(initial_url))
         
-        layout.addWidget(self.browser)
-
-        self.browser.setUrl(QUrl(DEFAULT_HOME_URL))
+        # Garante que os botões da toolbar estejam conectados corretamente após a primeira aba ser criada
+        self.update_toolbar_connections() # Chama isso para a aba inicial
 
     def _create_widget_from_layout(self, layout):
         widget = QWidget()
         widget.setLayout(layout)
         return widget
 
-    def navigate_to_url(self):
-        text = self.url_bar.text().strip()
+    # --- Novos Métodos Delegados para os botões da Toolbar ---
+    def _go_back_on_current_tab(self):
+        if self.current_browser_tab(): # Verifica se há uma aba ativa
+            self.current_browser_tab().browser.back()
 
+    def _go_forward_on_current_tab(self):
+        if self.current_browser_tab():
+            self.current_browser_tab().browser.forward()
+
+    def _reload_current_tab(self):
+        if self.current_browser_tab():
+            self.current_browser_tab().browser.reload()
+
+    def _go_home_on_current_tab(self):
+        if self.current_browser_tab():
+            self.current_browser_tab().browser.setUrl(QUrl(DEFAULT_HOME_URL))
+
+
+    def add_new_tab(self, qurl_or_bool=False):
+        """Adiciona uma nova aba ao navegador. Pode receber uma QUrl ou ser chamada por um sinal (bool)."""
+        if isinstance(qurl_or_bool, QUrl):
+            initial_url = qurl_or_bool
+        else:
+            initial_url = QUrl(DEFAULT_HOME_URL) # Se não for URL, é por clique no botão/duplo clique
+
+        # Cria uma nova instância de BrowserTabWidget, passando o perfil
+        browser_tab = BrowserTabWidget(self.web_profile, self, initial_url)
+        
+        # Adiciona a aba e a torna a aba ativa
+        index = self.tabs.addTab(browser_tab, "Nova Aba")
+        self.tabs.setCurrentIndex(index)
+
+    def close_current_tab(self):
+        """Fecha a aba atualmente ativa."""
+        current_index = self.tabs.currentIndex()
+        if self.tabs.count() > 1: # Não feche a última aba
+            self.tabs.removeTab(current_index)
+        else:
+            self.close() # Se for a última aba, fecha a janela principal
+
+    def close_tab_by_index(self, index):
+        """Fecha uma aba dado seu índice (usado pelo botão 'x' da aba)."""
+        if self.tabs.count() > 1: # Não feche a última aba
+            self.tabs.removeTab(index)
+        else:
+            self.close() # Se for a última aba, fecha a janela principal
+
+    def current_browser_tab(self):
+        """Retorna a instância de BrowserTabWidget da aba ativa."""
+        return self.tabs.currentWidget()
+
+    def navigate_to_url_from_bar(self):
+        """Navega para a URL digitada na barra de endereço da aba ativa."""
+        text = self.url_bar.text().strip()
         if not text:
             return
 
-        if (text.startswith("http://") or
+        current_browser = self.current_browser_tab().browser
+        
+        if os.path.exists(text):
+            url = QUrl.fromLocalFile(text)
+            current_browser.setUrl(url)
+        elif (text.startswith("http://") or
             text.startswith("https://") or
             text.startswith("ftp://") or
             ('.' in text and ' ' not in text)):
@@ -338,24 +450,100 @@ class Browser(QMainWindow):
                 url = "http://" + text
             else:
                 url = text
-            self.browser.setUrl(QUrl(url))
+            current_browser.setUrl(QUrl(url))
         else:
             search_query = QUrl.toPercentEncoding(text).data().decode('utf-8')
             search_url = DEFAULT_SEARCH_ENGINE_URL + search_query
-            self.browser.setUrl(QUrl(search_url))
+            current_browser.setUrl(QUrl(search_url))
 
     def update_url_bar(self, qurl):
-        self.url_bar.setText(qurl.toString())
+        # Esta função foi removida diretamente do browser.urlChanged.
+        # Agora ela é chamada pela aba ativa através de `tab_url_changed`.
+        pass
+
+    def tab_url_changed(self, qurl):
+        """Chamado quando a URL de uma aba muda."""
+        # Se a aba que mudou for a aba ativa, atualiza a barra de URL principal
+        if self.tabs.currentWidget() == self.sender(): # 'sender()' é a instância de BrowserTabWidget que emitiu o sinal
+            if qurl.isLocalFile():
+                self.url_bar.setText(qurl.toLocalFile())
+            else:
+                self.url_bar.setText(qurl.toString())
+            self.update_security_icon(qurl)
+
+    def tab_title_changed(self, title):
+        """Chamado quando o título de uma aba muda."""
+        # Atualiza o título da aba no QTabWidget
+        index = self.tabs.indexOf(self.sender())
+        if index != -1:
+            self.tabs.setTabText(index, title or "Nova Aba") # Fallback para "Nova Aba" se o título for vazio
+
+    def tab_load_finished(self, success):
+        """Chamado quando uma aba termina de carregar."""
+        # Você pode usar isso para mostrar/ocultar um spinner de carregamento, etc.
+        # Por enquanto, apenas garante que o ícone de segurança seja atualizado.
+        if self.tabs.currentWidget() == self.sender():
+            self.update_security_icon(self.sender().browser.url())
+
+    def current_tab_changed(self, index):
+        """Chamado quando a aba ativa muda."""
+        # Atualiza a barra de URL e o ícone de segurança para refletir a nova aba ativa
+        if index != -1:
+            current_tab_widget = self.tabs.widget(index)
+            if current_tab_widget:
+                current_url = current_tab_widget.browser.url()
+                if current_url.isLocalFile():
+                    self.url_bar.setText(current_url.toLocalFile())
+                else:
+                    self.url_bar.setText(current_url.toString())
+                self.update_security_icon(current_url)
+                self.tabs.setTabText(index, current_tab_widget.browser.title() or "Nova Aba")
+                # Garante que os botões de navegação da toolbar estejam conectados ao browser correto
+                self.update_toolbar_connections()
         
+    def update_toolbar_connections(self):
+        """Atualiza os alvos dos botões da toolbar para a aba ativa."""
+        # Desconecta e reconecta os botões da toolbar para a aba atualmente ativa
+        current_browser = self.current_browser_tab().browser
+        
+        # Percorre as ações da toolbar e atualiza suas conexões
+        for action in self.findChildren(QAction):
+            if action.text() == "Voltar":
+                try:
+                    action.triggered.disconnect()
+                except TypeError: # Ignora se não houver conexão anterior
+                    pass
+                action.triggered.connect(current_browser.back)
+            elif action.text() == "Avançar":
+                try:
+                    action.triggered.disconnect()
+                except TypeError:
+                    pass
+                action.triggered.connect(current_browser.forward)
+            elif action.text() == "Recarregar":
+                try:
+                    action.triggered.disconnect()
+                except TypeError:
+                    pass
+                action.triggered.connect(current_browser.reload)
+            elif action.text() == "Home":
+                try:
+                    action.triggered.disconnect()
+                except TypeError:
+                    pass
+                action.triggered.connect(self._go_home_on_current_tab) # O Home button continua chamando o delegado
+
+    def update_security_icon(self, qurl):
+        """Atualiza o ícone de segurança com base na URL."""
         if qurl.scheme() == "https":
             self.secure_icon.setPixmap(QIcon.fromTheme("object-locked", QIcon.fromTheme("dialog-ok")).pixmap(20, 20))
             self.secure_icon.setToolTip("Conexão segura (HTTPS)")
+        elif qurl.isLocalFile():
+             self.secure_icon.setPixmap(QIcon.fromTheme("dialog-information", QIcon.fromTheme("dialog-information")).pixmap(20, 20))
+             self.secure_icon.setToolTip("Arquivo local")
         else:
             self.secure_icon.setPixmap(QIcon.fromTheme("dialog-warning", QIcon.fromTheme("dialog-error")).pixmap(20, 20))
             self.secure_icon.setToolTip("Conexão não segura ou HTTP")
-
-    def navigate_home(self):
-        self.browser.setUrl(QUrl(DEFAULT_HOME_URL))
 
     def show_profile_management_dialog(self):
         dialog = ProfileSelectionDialog(self)
@@ -370,9 +558,11 @@ class Browser(QMainWindow):
         if self.is_guest_mode and self.guest_temp_path:
             print(f"Agendando limpeza do modo convidado para: {self.guest_temp_path}")
             
+            # Limpa o cache e links visitados do perfil antes de fechar
             if self._guest_web_profile_ref:
                 self._guest_web_profile_ref.clearHttpCache()
                 self._guest_web_profile_ref.clearAllVisitedLinks()
+                # Libera a referência ao perfil para que o coletor de lixo possa atuar
                 self._guest_web_profile_ref = None 
                 print("Referências ao QWebEngineProfile do modo convidado liberadas.")
 
@@ -382,7 +572,6 @@ class Browser(QMainWindow):
         super().closeEvent(event)
 
     def _start_cleaner_thread(self):
-        """Método auxiliar para iniciar a thread de limpeza."""
         self._cleaner_thread = clean_guest_profile_data_async(self.guest_temp_path)
 
 if __name__ == "__main__":
@@ -390,11 +579,20 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
 
+    profile_to_load = "guest_mode"
+    initial_load_url = DEFAULT_HOME_URL
+
+    if len(sys.argv) > 1:
+        file_path_from_arg = sys.argv[1]
+        if os.path.exists(file_path_from_arg) and file_path_from_arg.lower().endswith(('.html', '.htm')):
+            initial_load_url = QUrl.fromLocalFile(file_path_from_arg).toString()
+            print(f"Iniciando com arquivo local: {file_path_from_arg}")
+        else:
+            print(f"Argumento inválido ou arquivo não HTML: {file_path_from_arg}")
+
     profiles_dir = get_profiles_data_dir()
     existing_profiles = [d for d in os.listdir(profiles_dir) if os.path.isdir(os.path.join(profiles_dir, d))]
     profiles_exist = bool(existing_profiles)
-
-    profile_to_load = "guest_mode"
 
     if profiles_exist:
         dialog = ProfileSelectionDialog()
@@ -410,7 +608,7 @@ if __name__ == "__main__":
                                 "Você pode criar um novo perfil usando a opção 'Gerenciar Perfis'.")
         profile_to_load = "guest_mode"
 
-    browser_window = Browser(profile_to_load)
+    browser_window = Browser(profile_to_load, initial_url=initial_load_url)
     browser_window.show()
 
     sys.exit(app.exec_())
