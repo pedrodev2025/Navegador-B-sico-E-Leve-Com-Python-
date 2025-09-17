@@ -53,4 +53,4 @@ Se você ainda não clonou o repositório, faça isso:
 
 ```bash
 sudo pacman -S git # Instala o Git, se ainda não estiver instalado
-git clone [https://github.com/pedrodev2025/Navegador-B-sico-E-Leve-Com-Python-.git](https://github.com/pedrodev2025/Navegador-B-sico-E-Leve-Com-Python-.git)
+git clone https://github.com/pedrodev2025/Navegador-B-sico-E-Leve-Com-Python-.git
